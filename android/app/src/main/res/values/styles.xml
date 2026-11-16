@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- One fixed dark theme: a darkroom, not the system's light/dark mode. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowBackground">#0F0E0C</item>
+        <item name="android:colorBackground">#0F0E0C</item>
+        <item name="android:colorAccent">#E9A23B</item>
+        <item name="android:colorControlActivated">#E9A23B</item>
+        <item name="android:colorControlNormal">#8C847A</item>
+        <item name="android:textColorPrimary">#EFE8DC</item>
+        <item name="android:textColorSecondary">#9B9286</item>
+        <item name="android:statusBarColor">#0F0E0C</item>
+        <item name="android:navigationBarColor">#0F0E0C</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
+    </style>
+
+    <!-- the immersive view: black from the first frame, no window animation flash -->
+    <style name="Immersive" parent="AppTheme">
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+
+    <style name="AppDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:colorAccent">#E9A23B</item>
+        <item name="android:colorBackground">#1C1A17</item>
+        <item name="android:textColorPrimary">#EFE8DC</item>
+        <item name="android:textColorSecondary">#9B9286</item>
+    </style>
+</resources>

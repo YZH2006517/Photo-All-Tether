@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nikon 0x04B0, Canon 0x04A9, Sony 0x054C, Fujifilm 0x04CB, Panasonic 0x04DA, Olympus 0x07B4,
+         OM Digital 0x33A2, Pentax 0x0A17, Ricoh 0x25FB, Leica 0x1A98, Sigma 0x1003, Hasselblad 0x0FE4,
+         and any PTP still-image camera -->
+    <usb-device vendor-id="1200" />
+    <usb-device vendor-id="1193" />
+    <usb-device vendor-id="1356" />
+    <usb-device vendor-id="1227" />
+    <usb-device vendor-id="1242" />
+    <usb-device vendor-id="1972" />
+    <usb-device vendor-id="13218" />
+    <usb-device vendor-id="2583" />
+    <usb-device vendor-id="9723" />
+    <usb-device vendor-id="6808" />
+    <usb-device vendor-id="4099" />
+    <usb-device vendor-id="4068" />
+    <usb-device class="6" subclass="1" protocol="1" />
+</resources>

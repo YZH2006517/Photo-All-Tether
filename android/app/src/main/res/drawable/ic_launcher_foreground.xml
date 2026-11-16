@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A film frame with sprocket holes, a lens circle in it, and a cable leaving it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#E9A23B"
+        android:pathData="M30,34h48a4,4 0 0 1 4,4v32a4,4 0 0 1 -4,4h-48a4,4 0 0 1 -4,-4v-32a4,4 0 0 1 4,-4z" />
+    <path android:fillColor="#17140F"
+        android:pathData="M54,42a12,12 0 1 1 0,24a12,12 0 1 1 0,-24z" />
+    <path android:fillColor="#E9A23B"
+        android:pathData="M54,47a7,7 0 1 1 0,14a7,7 0 1 1 0,-14z" />
+    <path android:fillColor="#17140F"
+        android:pathData="M31,38h4v4h-4zM31,48h4v4h-4zM31,58h4v4h-4zM31,66h4v4h-4zM73,38h4v4h-4zM73,48h4v4h-4zM73,58h4v4h-4zM73,66h4v4h-4z" />
+    <path android:fillColor="#E9A23B"
+        android:pathData="M52,74h4v8h-4z" />
+</vector>

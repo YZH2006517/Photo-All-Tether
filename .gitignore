@@ -1,0 +1,16 @@
+# build outputs
+/build/
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+*.apk
+*.aab
+
+# machine-specific
+android/local.properties
+.idea/
+*.iml
+.vscode/
+.DS_Store

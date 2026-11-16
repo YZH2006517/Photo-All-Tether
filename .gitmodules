@@ -1,0 +1,6 @@
+[submodule "third_party/LibRaw"]
+	path = third_party/LibRaw
+	url = https://github.com/LibRaw/LibRaw.git
+[submodule "third_party/Photo-All-Android"]
+	path = third_party/Photo-All-Android
+	url = https://github.com/YZH2006517/Photo-All-Android.git
