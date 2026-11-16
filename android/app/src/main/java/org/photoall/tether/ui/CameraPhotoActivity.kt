@@ -6,110 +6,112 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
-import android.view.GestureDetector
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.Toast
+import android.widget.TextView
 import org.photoall.tether.camera.CameraHub
 import org.photoall.tether.camera.CameraItem
 import org.photoall.tether.develop.DevelopQueue
 import org.photoall.tether.develop.Library
+import org.photoall.tether.develop.Prefs
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.abs
 
-/** One shot on the camera: a large preview, its files and what can be done with it. Swipe for the next. */
-class CameraPhotoActivity : Activity() {
-    private lateinit var image: ImageView
+/**
+ * One shot on the camera, as Photos shows a picture: black, a bar above with its name, a
+ * toolbar of glyphs below (develop, import, protect, delete, info). Swipe for the next; tap to
+ * hide the bars; the info rises as a card from the bottom.
+ */
+class CameraPhotoActivity : AdaptiveActivity() {
+    private lateinit var image: ZoomImageView
     private lateinit var spinner: ProgressBar
-    private lateinit var title: android.widget.TextView
-    private lateinit var info: android.widget.TextView
-    private lateinit var protectButton: android.widget.TextView
+    private lateinit var title: TextView
+    private lateinit var subtitle: TextView
+    private lateinit var protectButton: IconView
+    private lateinit var bars: List<View>
+    private lateinit var sheet: LinearLayout
+    private lateinit var sheetText: TextView
     private var keys: List<String> = emptyList()
     private var index = 0
     private var item: CameraItem? = null
     private var loadToken = 0
+    private var direction = 0
     private val hubListener: () -> Unit = { if (CameraHub.state != CameraHub.State.CONNECTED) finish() else refreshInfo() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Prefs.applyOrientation(this)
         keys = CameraPage.visibleKeys
-        org.photoall.tether.develop.Prefs.applyOrientation(this)
         index = savedInstanceState?.getInt("index")?.takeIf { it in keys.indices }
             ?: keys.indexOf(intent.getStringExtra(KEY)).coerceAtLeast(0)
-        // landscape: the picture on the left, the panel on the right
         val wide = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
-        val root = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
-        image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        root.addView(image, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            if (wide) {
-                marginEnd = dp(320)
-                topMargin = dp(8)
-                bottomMargin = dp(8)
-            } else {
-                bottomMargin = dp(190)
-                topMargin = dp(56)
-            }
-        })
-        spinner = ProgressBar(this).apply { isIndeterminate = true }
-        root.addView(spinner, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+        val root = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
+        image = ZoomImageView(this)
+        image.onSwipe = { go(index + it, it) }
+        image.onTap = { toggleBars() }
+        root.addView(image, frameMatch())
+        spinner = ProgressBar(this).apply { isIndeterminate = true; indeterminateTintList = android.content.res.ColorStateList.valueOf(Ui.SUB) }
+        root.addView(spinner, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(6), dp(14), dp(6))
+            setBackgroundColor(Ui.BAR)
+            setPadding(dp(6), dp(8), dp(16), dp(8))
         }
-        top.addView(label("‹", 30f).apply { setPadding(dp(10), 0, dp(14), dp(4)); setOnClickListener { finish() } })
-        title = label("", 16f, bold = true).single()
-        top.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        root.addView(top, FrameLayout.LayoutParams(if (wide) dp(320) else ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT, if (wide) Gravity.TOP or Gravity.END else Gravity.TOP))
+        top.addView(iconButton(Glyph.CHEVRON_LEFT, Ui.ACCENT, 40, filled = false, description = "返回") { finish() })
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        title = label("", Ui.HEADLINE, bold = true).single()
+        subtitle = label("", Ui.CAPTION, Ui.SUB, bold = true).single()
+        texts.addView(title)
+        texts.addView(subtitle)
+        top.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(View(this), LinearLayout.LayoutParams(dp(40), 1))
+        root.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = rounded(Ui.SURFACE, dp(18).toFloat())
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-        }
-        info = label("", 13f, Ui.SUB).apply { setLineSpacing(0f, 1.35f) }
-        panel.addView(info)
-        protectButton = button("保护") { protect() }
-        val actions = row(
-            button("冲洗", primary = true) { develop(true) },
-            button("导入原片") { develop(false) },
+        protectButton = iconButton(Glyph.LOCK, Ui.ACCENT, 46, filled = false, description = "保护") { protect() }
+        val tools = listOf(
+            iconButton(Glyph.WAND, Ui.ACCENT, 46, filled = false, description = "冲洗") { develop(true) },
+            iconButton(Glyph.IMPORT, Ui.ACCENT, 46, filled = false, description = "导入原片") { develop(false) },
             protectButton,
-            button("删除", danger = true) { delete() },
-        ).apply { setPadding(0, dp(12), 0, 0) }
-        panel.addView(hScroll(actions))
-        if (wide) {
-            panel.removeView(info)
-            panel.addView(android.widget.ScrollView(this).apply { addView(info) },
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            root.addView(panel, FrameLayout.LayoutParams(dp(304), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
-                setMargins(0, dp(60), dp(8), dp(8))
-            })
-        } else root.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
-            setMargins(dp(10), 0, dp(10), dp(10))
-        })
-
-        val swipe = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-                if (abs(vx) < abs(vy) || abs(vx) < 400) return false
-                go(if (vx < 0) index + 1 else index - 1)
-                return true
+            iconButton(Glyph.INFO, Ui.ACCENT, 46, filled = false, description = "信息") { toggleSheet() },
+            iconButton(Glyph.TRASH, Ui.RED, 46, filled = false, description = "删除") { delete() },
+        )
+        val toolbar = LinearLayout(this).apply {
+            orientation = if (wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Ui.BAR)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            tools.forEach { b ->
+                addView(b, if (wide) LinearLayout.LayoutParams(dp(46), 0, 1f) else LinearLayout.LayoutParams(0, dp(46), 1f))
             }
-        })
-        image.setOnTouchListener { _, e -> swipe.onTouchEvent(e); true }
+        }
+        if (wide) {
+            root.addView(toolbar, FrameLayout.LayoutParams(dp(68), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
+            (top.layoutParams as FrameLayout.LayoutParams).marginEnd = dp(68)
+        } else root.addView(toolbar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        bars = listOf(top, toolbar)
+
+        // the info card, risen from the bottom on demand
+        sheet = card().apply {
+            setPadding(dp(18), dp(16), dp(18), dp(18))
+            elevation = dp(16).toFloat()
+            visibility = View.GONE
+        }
+        sheetText = label("", Ui.SUBHEAD, Ui.TEXT).apply { setLineSpacing(0f, 1.4f); setTextIsSelectable(true) }
+        sheet.addView(sheetText)
+        root.addView(sheet, FrameLayout.LayoutParams(if (wide) dp(380) else ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(10), 0, dp(10), dp(if (wide) 10 else 76)) })
+
         setContentView(root)
         padForSystemBars(root)
-        go(index)
+        go(index, 0)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -129,57 +131,101 @@ class CameraPhotoActivity : Activity() {
 
     private fun current(): CameraItem? = keys.getOrNull(index)?.let { k -> CameraHub.items.firstOrNull { it.key == k } }
 
-    private fun go(i: Int) {
-        if (i !in keys.indices) return
+    private fun toggleBars() {
+        val show = bars.first().alpha < 0.5f
+        bars.forEach { it.animate().alpha(if (show) 1f else 0f).setDuration(200).start() }
+        if (!show && sheet.visibility == View.VISIBLE) toggleSheet()
+    }
+
+    private fun toggleSheet() {
+        if (sheet.visibility == View.VISIBLE) {
+            sheet.animate().translationY(sheet.height.toFloat() + dp(40)).alpha(0f).setDuration(220).setInterpolator(Ease.out)
+                .withEndAction { sheet.visibility = View.GONE }.start()
+        } else {
+            refreshInfo()
+            sheet.visibility = View.VISIBLE
+            sheet.alpha = 0f
+            sheet.translationY = dp(120).toFloat()
+            sheet.animate().translationY(0f).alpha(1f).setDuration(460).setInterpolator(Ease.spring).start()
+        }
+    }
+
+    private fun go(i: Int, dir: Int) {
+        if (i !in keys.indices) {
+            if (dir != 0) { Haptic.reject(image); image.nudge() }
+            return
+        }
         index = i
+        direction = dir
         val it = current() ?: return finish()
         item = it
         refreshInfo()
         val token = ++loadToken
         val small = CameraHub.cachedThumb(it.jpeg ?: it.primary)
-        image.setImageBitmap(small)
+        showImage(small, slide = dir != 0)
         spinner.visibility = View.VISIBLE
         CameraHub.run {
             val big: Bitmap? = runCatching { CameraHub.preview(it, 2400) }.getOrNull()
             runOnUiThread {
                 if (token != loadToken) return@runOnUiThread
                 spinner.visibility = View.GONE
-                if (big != null) image.setImageBitmap(big)
-                else if (small == null) Toast.makeText(this, "相机没有给出预览", Toast.LENGTH_SHORT).show()
+                if (big != null) {
+                    image.setImageBitmap(big)
+                    image.alpha = 0.6f
+                    image.animate().alpha(1f).setDuration(280).start()
+                }
             }
+        }
+    }
+
+    // the next picture slides in from the side it was swiped toward
+    private fun showImage(bmp: Bitmap?, slide: Boolean) {
+        image.setImageBitmap(bmp)
+        if (slide && !Ease.reduced(this)) {
+            image.translationX = direction * image.width * 0.35f
+            image.alpha = 0f
+            image.animate().translationX(0f).alpha(1f).setDuration(380).setInterpolator(Ease.out).start()
+            Haptic.tick(image)
         }
     }
 
     private fun refreshInfo() {
         val it = current() ?: return
         item = it
-        title.text = "${it.name}   ${index + 1} / ${keys.size}"
-        val time = if (it.time > 0) SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(it.time)) else "未知"
+        title.text = it.name
+        val time = if (it.time > 0) SimpleDateFormat("M月d日 HH:mm", Locale.CHINA).format(Date(it.time)) else ""
+        subtitle.text = "${index + 1} / ${keys.size}" + if (time.isNotEmpty()) " · $time" else ""
+        protectButton.glyph = if (it.isProtected) Glyph.UNLOCK else Glyph.LOCK
         val onPhone = Library.originalOf(it.key) != null
         val prints = Library.printsOf(it.key)
-        val lines = mutableListOf<String>()
-        it.files.forEach { f ->
-            val dims = if (f.imageWidth > 0) " · ${f.imageWidth}×${f.imageHeight}" else ""
-            lines += "${f.filename}  ${formatBytes(f.size)}$dims"
+        sheetText.text = buildString {
+            it.files.forEach { f ->
+                append(f.filename).append("    ").append(formatBytes(f.size))
+                if (f.imageWidth > 0) append("    ${f.imageWidth}×${f.imageHeight}")
+                append('\n')
+            }
+            append(CameraHub.storageName(it.storageId))
+            if (time.isNotEmpty()) append("  ·  ").append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(it.time)))
+            append('\n')
+            append(listOfNotNull(
+                if (it.isProtected) "受保护" else null,
+                if (onPhone) "原片在手机上" else null,
+                if (prints > 0) "已冲洗 $prints 张" else null,
+            ).joinToString("  ·  ").ifEmpty { "未导入" })
         }
-        lines += "拍摄 $time · ${CameraHub.storageName(it.storageId)}"
-        lines += listOfNotNull(
-            if (it.isProtected) "受保护" else null,
-            if (onPhone) "原片已存到手机" else "原片未导入",
-            if (prints > 0) "已冲洗 $prints 张" else null,
-        ).joinToString(" · ")
-        info.text = lines.joinToString("\n")
-        protectButton.text = if (it.isProtected) "取消保护" else "保护"
     }
 
     private fun develop(develop: Boolean) {
         val it = item ?: return
         if (develop && !it.canDevelop) {
-            Toast.makeText(this, "这个文件不能冲洗（${it.badge}）", Toast.LENGTH_SHORT).show()
+            Haptic.reject(image)
+            Hud.show(this, Glyph.CLOSE, it.badge, Ui.RED)
             return
         }
+        CameraHub.note("${if (develop) "冲洗" else "导入"}：${it.name}（${it.badge}）")
         DevelopQueue.addCamera(this, it, develop)
-        Toast.makeText(this, if (develop) "已加入冲洗" else "开始导入原片", Toast.LENGTH_SHORT).show()
+        Haptic.confirm(image)
+        Hud.show(this, if (develop) Glyph.WAND else Glyph.IMPORT, if (develop) "冲洗中" else "导入中")
     }
 
     private fun protect() {
@@ -187,7 +233,12 @@ class CameraPhotoActivity : Activity() {
         CameraHub.run {
             val errors = CameraHub.protect(listOf(it), !it.isProtected)
             runOnUiThread {
-                if (errors.isNotEmpty()) Toast.makeText(this, errors.first(), Toast.LENGTH_LONG).show()
+                if (errors.isNotEmpty()) Hud.show(this, Glyph.CLOSE, "未完成", Ui.RED)
+                else {
+                    Haptic.confirm(image)
+                    Hud.show(this, if (it.isProtected) Glyph.UNLOCK else Glyph.LOCK)
+                    protectButton.pop(0.6f)
+                }
                 refreshInfo()
             }
         }
@@ -196,17 +247,24 @@ class CameraPhotoActivity : Activity() {
     private fun delete() {
         val it = item ?: return
         AlertDialog.Builder(this).setTitle("从相机删除 ${it.name}？")
-            .setMessage("将从存储卡删除 ${it.files.joinToString("、") { f -> f.filename }}，无法撤销。")
+            .setMessage(it.files.joinToString("、") { f -> f.filename })
             .setPositiveButton("删除") { _, _ ->
                 CameraHub.run {
                     val errors = CameraHub.delete(listOf(it))
                     runOnUiThread {
                         if (errors.isNotEmpty()) {
-                            Toast.makeText(this, errors.first(), Toast.LENGTH_LONG).show()
+                            Hud.show(this, Glyph.CLOSE, "未删除", Ui.RED)
                             return@runOnUiThread
                         }
-                        keys = keys - it.key
-                        if (keys.isEmpty()) finish() else go(index.coerceAtMost(keys.lastIndex))
+                        Haptic.confirm(image)
+                        // the picture falls away
+                        image.animate().scaleX(0.6f).scaleY(0.6f).alpha(0f).translationY(dp(80).toFloat()).setDuration(320)
+                            .setInterpolator(Ease.out).withEndAction {
+                                image.scaleX = 1f; image.scaleY = 1f; image.translationY = 0f
+                                keys = keys - it.key
+                                if (keys.isEmpty()) finish() else go(index.coerceAtMost(keys.lastIndex), 0)
+                                image.alpha = 1f
+                            }.start()
                     }
                 }
             }

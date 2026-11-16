@@ -36,6 +36,15 @@ object Prefs {
     fun keepScreenOn(c: Context) = p(c).getBoolean("keepScreenOn", true)
     fun setKeepScreenOn(c: Context, on: Boolean) = p(c).edit().putBoolean("keepScreenOn", on).apply()
 
+    /** 0 follows the system, 1 dark, 2 light. */
+    val themeNames = listOf("跟随系统", "深色", "浅色")
+    fun theme(c: Context) = p(c).getInt("theme", 1).coerceIn(0, 2)
+    fun setTheme(c: Context, t: Int) = p(c).edit().putInt("theme", t).apply()
+
+    /** The app hides the system bars (swipe from an edge brings them back for a moment). */
+    fun fullscreen(c: Context) = p(c).getBoolean("fullscreen", true)
+    fun setFullscreen(c: Context, on: Boolean) = p(c).edit().putBoolean("fullscreen", on).apply()
+
     /** 0 rotates with the phone (as the system's rotation lock allows), 1 portrait, 2 landscape. */
     val orientationNames = listOf("自动旋转", "竖屏", "横屏")
     fun orientation(c: Context) = p(c).getInt("orientation", 0).coerceIn(0, 2)

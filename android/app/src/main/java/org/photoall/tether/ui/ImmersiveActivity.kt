@@ -31,7 +31,8 @@ import java.util.concurrent.Executors
  * through earlier ones: then a note offers to jump to it). Swipe for others, pinch to zoom,
  * tap for the caption, back to leave.
  */
-class ImmersiveActivity : Activity() {
+class ImmersiveActivity : AdaptiveActivity() {
+    override val alwaysFullscreen = true
     private lateinit var image: ZoomImageView
     private lateinit var fade: ZoomImageView
     private lateinit var caption: LinearLayout
@@ -42,9 +43,15 @@ class ImmersiveActivity : Activity() {
     private var prints: List<Library.Entry> = emptyList()
     private var index = 0
     private var token = 0
+    /** The next picture shown is a new print: it comes up as in the developer. */
+    private var revealNext = false
     private val hideCaption = Runnable { caption.animate().alpha(0f).setDuration(400).start() }
     private val libraryListener: () -> Unit = { onLibrary() }
     private val queueListener: () -> Unit = { refreshDetail() }
+    private val hubListener: () -> Unit = { panel?.refresh(prints.getOrNull(index), index, prints.size) }
+    private val rollListener: (org.photoall.tether.develop.Roll.Event) -> Unit = { hubListener() }
+    /** Landscape only: the column of data beside the picture. */
+    private var panel: InfoPanel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,7 +99,18 @@ class ImmersiveActivity : Activity() {
         root.addView(newNote, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
 
-        setContentView(root)
+        // Landscape: the picture takes four fifths; the last fifth is a column of what is going on.
+        if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            caption.visibility = View.GONE
+            image.onTap = { togglePanel() }
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(0xFF000000.toInt()) }
+            row.addView(root, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 4f))
+            val p = InfoPanel(this) { finish() }
+            panel = p
+            row.addView(p, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            setContentView(row)
+            padForSystemBars(row)
+        } else setContentView(root)
         hideBars()
         prints = Library.prints()
         index = savedInstanceState?.getInt("index") ?: 0
@@ -108,12 +126,17 @@ class ImmersiveActivity : Activity() {
         super.onStart()
         Library.addListener(libraryListener)
         DevelopQueue.addListener(queueListener)
+        CameraHub.addListener(hubListener)
+        org.photoall.tether.develop.Roll.addListener(rollListener)
+        hubListener()
         showing = true
     }
 
     override fun onStop() {
         Library.removeListener(libraryListener)
         DevelopQueue.removeListener(queueListener)
+        CameraHub.removeListener(hubListener)
+        org.photoall.tether.develop.Roll.removeListener(rollListener)
         showing = false
         super.onStop()
     }
@@ -158,7 +181,7 @@ class ImmersiveActivity : Activity() {
         if (now.isEmpty()) return showEmpty()
         val added = now.firstOrNull()?.uri != old.firstOrNull()?.uri
         when {
-            current == null || (added && index == 0) -> go(0)
+            current == null || (added && index == 0) -> { revealNext = added; go(0) }
             else -> {
                 index = now.indexOfFirst { it.uri == current.uri }.takeIf { it >= 0 } ?: 0
                 if (added) newNote.visibility = View.VISIBLE
@@ -195,6 +218,20 @@ class ImmersiveActivity : Activity() {
     }
 
     private fun show(bitmap: Bitmap, animate: Boolean) {
+        if (revealNext) {
+            // a new print: out of the dark, settling from a slight closeness, felt as it lands
+            revealNext = false
+            fade.setImageDrawable(null)
+            image.alpha = 1f
+            image.setImageBitmap(bitmap)
+            if (!Ease.reduced(this)) {
+                image.scaleX = 1.06f; image.scaleY = 1.06f
+                image.animate().scaleX(1f).scaleY(1f).setDuration(2600).setInterpolator(Ease.out).start()
+                image.develop(2400)
+            }
+            Haptic.success(image)
+            return
+        }
         if (animate && image.drawable != null) {
             fade.setImageDrawable(image.drawable)
             fade.alpha = 1f
@@ -231,6 +268,22 @@ class ImmersiveActivity : Activity() {
         if (active != null) parts += "正在${active.status.text} ${active.title}"
         else if (CameraHub.state == CameraHub.State.CONNECTED) parts += "联机中"
         detail.text = parts.joinToString("  ·  ")
+        panel?.refresh(prints.getOrNull(index), index, prints.size)
+    }
+
+    // the column slides away for the picture alone, and back
+    private fun togglePanel() {
+        val p = panel ?: return
+        Haptic.tick(p)
+        if (p.visibility == View.VISIBLE) {
+            p.animate().translationX(p.width.toFloat()).alpha(0f).setDuration(260).setInterpolator(Ease.out)
+                .withEndAction { p.visibility = View.GONE }.start()
+        } else {
+            p.visibility = View.VISIBLE
+            p.translationX = dp(80).toFloat()
+            p.alpha = 0f
+            p.animate().translationX(0f).alpha(1f).setDuration(460).setInterpolator(Ease.spring).start()
+        }
     }
 
     private fun showCaption() {

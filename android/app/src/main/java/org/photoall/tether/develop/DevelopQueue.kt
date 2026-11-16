@@ -153,6 +153,7 @@ object DevelopQueue {
                     }
                 }
                 val seconds = (System.currentTimeMillis() - started) / 1000.0
+                CameraHub.lastSpeed = file.length() / 1048576.0 / seconds.coerceAtLeast(0.01)
                 CameraHub.note("传输 ${info.filename}：%.1f MB，%.1f 秒（%.1f MB/s）".format(
                     file.length() / 1048576.0, seconds, file.length() / 1048576.0 / seconds.coerceAtLeast(0.01)))
                 if (Prefs.keepOriginal(app) || !job.develop) saveOriginal(app, job, file, info)

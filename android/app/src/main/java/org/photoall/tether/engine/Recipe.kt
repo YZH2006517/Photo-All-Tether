@@ -29,20 +29,51 @@ data class Recipe(
     val couplers: Boolean = true,
     val rawDenoise: Float = 0.3f,
     val chromaDenoise: Float = 0.5f,
+    /** The advanced filmsim parameters set away from their defaults (FilmParamsCatalog keys). */
+    val extra: Map<String, Float> = emptyMap(),
 ) {
     /** filmsim parameters (vkdt names) and the engine's stage switches. */
-    fun params(): Map<String, Float> = linkedMapOf(
-        "film" to film.toFloat(),
-        "paper" to paper.toFloat(),
-        "filter c" to if (balance == BALANCE_FILM) -2f else -1f,
-        "grain" to if (grain) 1f else 0f,
-        "size" to grainSize,
-        "halation" to if (halation) 1f else 0f,
-        "hal amt" to halationAmount,
-        "couplers" to if (couplers) 1f else 0f,
-        "stage film" to if (filmOn) 1f else 0f,
-        "stage print" to if (printOn) 1f else 0f,
-    )
+    fun params(): Map<String, Float> {
+        val p = linkedMapOf(
+            "film" to film.toFloat(),
+            "paper" to paper.toFloat(),
+            "grain" to if (grain) 1f else 0f,
+            "size" to grainSize,
+            "halation" to if (halation) 1f else 0f,
+            "hal amt" to halationAmount,
+            "couplers" to if (couplers) 1f else 0f,
+            "stage film" to if (filmOn) 1f else 0f,
+            "stage print" to if (printOn) 1f else 0f,
+        )
+        for ((k, v) in extra) if (FilmParamsCatalog.byKey.containsKey(k)) p[k] = v
+        // the enlarger: the engine's fitted packs (-2 reference film, -1 neutral), or the user's
+        when (balance) {
+            BALANCE_MANUAL -> {
+                p["filter c"] = extra["filter c"] ?: 0f
+                p["filter m"] = extra["filter m"] ?: 0f
+                p["filter y"] = extra["filter y"] ?: 0f
+            }
+            else -> {
+                p["filter c"] = if (balance == BALANCE_FILM) -2f else -1f
+                p.remove("filter m")
+                p.remove("filter y")
+            }
+        }
+        // filmsim reads illuminants below its slider range as "off"
+        for (k in listOf("scne ill", "film ill")) if ((p[k] ?: 0f) < 2000f) p.remove(k)
+        return p
+    }
+
+    /** How many advanced parameters of [group] differ from their defaults. */
+    fun changed(group: FilmParamsCatalog.Group): Int =
+        group.params.count { prm -> extra[prm.key]?.let { kotlin.math.abs(it - prm.default) > 1e-4f } == true }
+
+    fun value(key: String): Float = extra[key] ?: FilmParamsCatalog.byKey[key]?.default ?: 0f
+
+    fun withParam(key: String, v: Float): Recipe {
+        val d = FilmParamsCatalog.byKey[key]?.default
+        return copy(extra = if (d != null && kotlin.math.abs(v - d) < 1e-4f) extra - key else extra + (key to v))
+    }
 
     fun kelvinFor(): Float = when (white) {
         WHITE_DAYLIGHT -> 5500f
@@ -66,6 +97,7 @@ data class Recipe(
         put("balance", balance); put("grain", grain); put("grainSize", grainSize.toDouble())
         put("halation", halation); put("halationAmount", halationAmount.toDouble()); put("couplers", couplers)
         put("rawDenoise", rawDenoise.toDouble()); put("chromaDenoise", chromaDenoise.toDouble())
+        put("extra", JSONObject().apply { extra.forEach { (k, v) -> put(k, v.toDouble()) } })
     }
 
     companion object {
@@ -78,6 +110,8 @@ data class Recipe(
 
         const val BALANCE_FILM = 0
         const val BALANCE_NEUTRAL = 1
+        const val BALANCE_MANUAL = 2
+        val balanceNames = listOf("保留胶片本色", "自动中性", "手动")
 
         fun fromJson(o: JSONObject): Recipe {
             val d = Recipe()
@@ -95,6 +129,9 @@ data class Recipe(
                 couplers = o.optBoolean("couplers", d.couplers),
                 rawDenoise = o.optDouble("rawDenoise", d.rawDenoise.toDouble()).toFloat(),
                 chromaDenoise = o.optDouble("chromaDenoise", d.chromaDenoise.toDouble()).toFloat(),
+                extra = o.optJSONObject("extra")?.let { e ->
+                    e.keys().asSequence().associateWith { e.getDouble(it).toFloat() }
+                } ?: emptyMap(),
             )
         }
 

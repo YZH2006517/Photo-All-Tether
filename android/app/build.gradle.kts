@@ -16,8 +16,8 @@ android {
         applicationId = "org.photoall.tether"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.0.1"
+        versionCode = 2
+        versionName = "0.0.2"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake { arguments += "-DPHOTOALL_PHONE=$phone" }
@@ -46,7 +46,7 @@ android {
     androidResources {
         noCompress += "lut"
         noCompress += "rgb"
-        // the phone app's 3D cartridge and film-edge fonts are not used here
-        ignoreAssetsPattern = "!cartridge3d:!fonts:!.*:!*~"
+        // the phone app's film-edge fonts are not used here (its 3D cartridge is)
+        ignoreAssetsPattern = "!fonts:!.*:!*~"
     }
 }

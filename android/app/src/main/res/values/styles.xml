@@ -1,21 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- One fixed dark theme: a darkroom, not the system's light/dark mode. -->
+    <!-- One dark theme, Apple's: a true-black ground, grouped greys, the system orange. -->
     <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:forceDarkAllowed">false</item>
-        <item name="android:windowBackground">#0F0E0C</item>
-        <item name="android:colorBackground">#0F0E0C</item>
-        <item name="android:colorAccent">#E9A23B</item>
-        <item name="android:colorControlActivated">#E9A23B</item>
-        <item name="android:colorControlNormal">#8C847A</item>
-        <item name="android:textColorPrimary">#EFE8DC</item>
-        <item name="android:textColorSecondary">#9B9286</item>
-        <item name="android:statusBarColor">#0F0E0C</item>
-        <item name="android:navigationBarColor">#0F0E0C</item>
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:colorBackground">#000000</item>
+        <item name="android:colorAccent">#FF9F0A</item>
+        <item name="android:colorControlActivated">#FF9F0A</item>
+        <item name="android:colorControlNormal">#8E8E93</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#98989F</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
         <item name="android:alertDialogTheme">@style/AppDialog</item>
+        <item name="android:windowAnimationStyle">@style/Push</item>
     </style>
 
-    <!-- the immersive view: black from the first frame, no window animation flash -->
+    <!-- moving between screens: the new one slides in from the right, the old drifts back -->
+    <style name="Push" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/push_in</item>
+        <item name="android:activityOpenExitAnimation">@anim/push_out</item>
+        <item name="android:activityCloseEnterAnimation">@anim/pop_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/pop_out</item>
+    </style>
+
+    <!-- the immersive view: black from the first frame -->
     <style name="Immersive" parent="AppTheme">
         <item name="android:windowBackground">#000000</item>
         <item name="android:windowFullscreen">true</item>
@@ -23,9 +32,9 @@
 
     <style name="AppDialog" parent="@android:style/Theme.Material.Dialog.Alert">
         <item name="android:forceDarkAllowed">false</item>
-        <item name="android:colorAccent">#E9A23B</item>
-        <item name="android:colorBackground">#1C1A17</item>
-        <item name="android:textColorPrimary">#EFE8DC</item>
-        <item name="android:textColorSecondary">#9B9286</item>
+        <item name="android:colorAccent">#FF9F0A</item>
+        <item name="android:colorBackground">#2C2C2E</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#98989F</item>
     </style>
 </resources>

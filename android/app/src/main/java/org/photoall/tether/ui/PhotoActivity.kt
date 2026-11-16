@@ -31,7 +31,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /** A print or an original on the phone: zoom in, read its record, share, develop again, delete. */
-class PhotoActivity : Activity() {
+class PhotoActivity : AdaptiveActivity() {
     private lateinit var image: ZoomImageView
     private lateinit var title: TextView
     private lateinit var subtitle: TextView
@@ -54,55 +54,50 @@ class PhotoActivity : Activity() {
         image.onSwipe = { go(index + it) }
         image.onTap = { bars.forEach { b -> b.visibility = if (b.visibility == View.VISIBLE) View.GONE else View.VISIBLE } }
         root.addView(image, frameMatch())
-        spinner = ProgressBar(this).apply { isIndeterminate = true }
-        root.addView(spinner, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+        spinner = ProgressBar(this).apply { isIndeterminate = true; indeterminateTintList = android.content.res.ColorStateList.valueOf(Ui.SUB) }
+        root.addView(spinner, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Ui.SCRIM)
-            setPadding(dp(8), dp(6), dp(14), dp(8))
+            setBackgroundColor(Ui.BAR)
+            setPadding(dp(6), dp(8), dp(16), dp(8))
         }
-        top.addView(label("‹", 30f).apply { setPadding(dp(10), 0, dp(14), dp(4)); setOnClickListener { finish() } })
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        title = label("", 15f, bold = true).single()
-        subtitle = label("", 12f, Ui.SUB).single().apply { setPadding(0, dp(3), 0, 0) }
+        top.addView(iconButton(Glyph.CHEVRON_LEFT, Ui.ACCENT, 40, filled = false, description = "返回") { finish() })
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        title = label("", Ui.HEADLINE, bold = true).single()
+        subtitle = label("", Ui.CAPTION, Ui.SUB, bold = true).single().apply { setPadding(0, dp(2), 0, 0) }
         texts.addView(title)
         texts.addView(subtitle)
         top.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(View(this), LinearLayout.LayoutParams(dp(40), 1))
         root.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
-        val actions = if (kind == Library.PRINT) row(
-            button("信息") { showInfo() },
-            button("分享") { share() },
-            button("用当前配方重冲", primary = true) { redevelop() },
-            button("删除", danger = true) { delete() },
-        ) else row(
-            button("信息") { showInfo() },
-            button("冲洗", primary = true) { redevelop() },
-            button("设为配方预览") { usePreview() },
-            button("分享") { share() },
-            button("删除", danger = true) { delete() },
+        // glyphs, not words: share, develop again, (originals: preview source), info, delete
+        val tools = if (kind == Library.PRINT) listOf(
+            iconButton(Glyph.SHARE, Ui.ACCENT, 46, filled = false, description = "分享") { share() },
+            iconButton(Glyph.WAND, Ui.ACCENT, 46, filled = false, description = "用当前配方重冲") { redevelop() },
+            iconButton(Glyph.INFO, Ui.ACCENT, 46, filled = false, description = "信息") { showInfo() },
+            iconButton(Glyph.TRASH, Ui.RED, 46, filled = false, description = "删除") { delete() },
+        ) else listOf(
+            iconButton(Glyph.WAND, Ui.ACCENT, 46, filled = false, description = "冲洗") { redevelop() },
+            iconButton(Glyph.DIAL, Ui.ACCENT, 46, filled = false, description = "设为配方预览") { usePreview() },
+            iconButton(Glyph.SHARE, Ui.ACCENT, 46, filled = false, description = "分享") { share() },
+            iconButton(Glyph.INFO, Ui.ACCENT, 46, filled = false, description = "信息") { showInfo() },
+            iconButton(Glyph.TRASH, Ui.RED, 46, filled = false, description = "删除") { delete() },
         )
         val wide = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        val bottom: View
-        if (wide) {
-            // landscape: the actions stacked on the right edge, the picture keeps its height
-            val buttons = (0 until actions.childCount).map { actions.getChildAt(it) }
-            actions.removeAllViews()
-            val rail = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(10), dp(10), dp(10))
-                buttons.forEach { b -> addView(b, LinearLayout.LayoutParams(dp(150), ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) }) }
-            }
-            bottom = android.widget.ScrollView(this).apply { setBackgroundColor(Ui.SCRIM); addView(rail) }
-            root.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
-            (top.layoutParams as FrameLayout.LayoutParams).marginEnd = dp(170)
-        } else {
-            bottom = hScroll(actions.apply { setPadding(dp(12), dp(10), dp(12), dp(10)) }).apply { setBackgroundColor(Ui.SCRIM) }
-            root.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        val bottom = LinearLayout(this).apply {
+            orientation = if (wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Ui.BAR)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            tools.forEach { b -> addView(b, if (wide) LinearLayout.LayoutParams(dp(46), 0, 1f) else LinearLayout.LayoutParams(0, dp(46), 1f)) }
         }
+        if (wide) {
+            root.addView(bottom, FrameLayout.LayoutParams(dp(68), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
+            (top.layoutParams as FrameLayout.LayoutParams).marginEnd = dp(68)
+        } else root.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         bars = listOf(top, bottom)
         setContentView(root)
         padForSystemBars(root)
@@ -121,9 +116,10 @@ class PhotoActivity : Activity() {
         index = i
         val e = entries[i]
         title.text = e.name
-        val time = (e.shotTime.takeIf { it > 0 } ?: e.time).let { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(it)) }
+        val time = (e.shotTime.takeIf { it > 0 } ?: e.time).let { SimpleDateFormat("M月d日 HH:mm", Locale.CHINA).format(Date(it)) }
         val recipe = e.recipe?.let { runCatching { Recipe.fromJson(it).summary() }.getOrNull() }
-        subtitle.text = listOfNotNull("${i + 1} / ${entries.size}", time, recipe).joinToString(" · ")
+        title.text = recipe ?: e.name
+        subtitle.text = listOf("${i + 1} / ${entries.size}", time).joinToString(" · ")
         val t = ++token
         spinner.visibility = View.VISIBLE
         image.setImageBitmap(null)
@@ -132,7 +128,11 @@ class PhotoActivity : Activity() {
             runOnUiThread {
                 if (t != token) return@runOnUiThread
                 spinner.visibility = View.GONE
-                if (bmp != null) image.setImageBitmap(bmp) else Toast.makeText(this, "无法显示这张照片", Toast.LENGTH_SHORT).show()
+                if (bmp != null) {
+                    image.setImageBitmap(bmp)
+                    image.alpha = 0f
+                    image.animate().alpha(1f).setDuration(260).start()
+                } else Hud.show(this, Glyph.PHOTO, "无法显示", Ui.RED)
             }
         }
     }
@@ -223,21 +223,24 @@ class PhotoActivity : Activity() {
         val e = current() ?: return
         val original = originalOf(e)
         if (original == null) {
-            Toast.makeText(this, "这张的原片不在手机上（打开「保存原片到手机」后冲洗的才有）", Toast.LENGTH_LONG).show()
+            Haptic.reject(image)
+            Hud.show(this, Glyph.PHOTO_STACK, "没有原片", Ui.RED)
             return
         }
         DevelopQueue.redevelop(this, original)
-        Toast.makeText(this, "已加入冲洗：${Recipe.load(this).summary()}", Toast.LENGTH_SHORT).show()
+        Haptic.confirm(image)
+        Hud.show(this, Glyph.WAND, org.photoall.tether.engine.Films.short(Recipe.load(this).film))
     }
 
     private fun usePreview() {
         val e = current() ?: return
         if (!e.isRaw) {
-            Toast.makeText(this, "配方预览需要 RAW 原片", Toast.LENGTH_SHORT).show()
+            Hud.show(this, Glyph.PHOTO, "需要 RAW", Ui.RED)
             return
         }
         Preview.useOriginal(this, e)
-        Toast.makeText(this, "已设为配方页的预览图", Toast.LENGTH_SHORT).show()
+        Haptic.confirm(image)
+        Hud.show(this, Glyph.DIAL, "配方预览")
     }
 
     private fun delete() {

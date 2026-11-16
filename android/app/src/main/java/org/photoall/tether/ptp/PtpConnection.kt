@@ -51,6 +51,15 @@ class PtpConnection private constructor(
     private val packet = bulkIn.maxPacketSize.coerceAtLeast(64)
     private val buffer = ByteArray(MAX_CHUNK)
     @Volatile private var chunk = MAX_CHUNK
+    /** Transactions so far, and the bytes they brought (for the camera's info page). */
+    @Volatile var transactions = 0
+        private set
+    @Volatile var bytesIn = 0L
+        private set
+
+    /** Bytes per USB transfer now (64 KB, or 16 KB once the phone refused larger ones). */
+    val chunkSize: Int get() = chunk
+    val packetSize: Int get() = packet
     private var start = 0
     private var end = 0
     private var stage = ""
@@ -112,6 +121,8 @@ class PtpConnection private constructor(
             val raw = ByteArray(count * 4)
             readExact(raw, raw.size, timeout)
             val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
+            transactions++
+            bytesIn += received
             if (operation == Ptp.OPEN_SESSION && (head.code == Ptp.OK || head.code == Ptp.SESSION_ALREADY_OPEN)) sessionOpen = true
             note("#$tid $name → ${Ptp.responseName(head.code)}${if (received > 0) "，$received 字节" else ""}，${SystemClock.elapsedRealtime() - began} ms")
             Response(head.code, IntArray(count) { bb.int })

@@ -17,32 +17,35 @@ open class SquareFrame(context: Context) : FrameLayout(context) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) = super.onMeasure(widthMeasureSpec, widthMeasureSpec)
 }
 
-/** A thumbnail cell: picture, a badge, corner marks and a selection ring. */
+/**
+ * A thumbnail cell in the manner of Photos: the picture edge to edge, its kind in a small tag,
+ * glyphs for what is true of it (on the phone, protected). In selection, every cell shows a
+ * circle; a chosen one shrinks a little and its circle fills with a check that pops.
+ */
 class ThumbCell(context: Context) : SquareFrame(context) {
     val image = ImageView(context).apply {
         scaleType = ImageView.ScaleType.CENTER_CROP
-        setBackgroundColor(Ui.SURFACE2)
+        setBackgroundColor(Ui.SURFACE)
     }
     val badge = TextView(context).apply {
-        textSize = 9.5f
+        textSize = 9f
         setTextColor(Ui.TEXT)
         typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        background = rounded(0xB0000000.toInt(), dp(4).toFloat())
+        background = rounded(0x99000000.toInt(), dp(4).toFloat())
         setPadding(dp(4), dp(1), dp(4), dp(1))
     }
-    val marks = TextView(context).apply {
-        textSize = 9.5f
-        setTextColor(Ui.BG)
-        typeface = Typeface.DEFAULT_BOLD
-        setPadding(dp(4), dp(1), dp(4), dp(1))
-    }
-    private val ring = View(context)
-    private val check = TextView(context).apply {
-        text = "✓"
-        textSize = 12f
-        gravity = Gravity.CENTER
-        setTextColor(Ui.BG)
-        background = rounded(Ui.ACCENT, dp(11).toFloat())
+    private val marks = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    private val onPhone = IconView(context, Glyph.CHECK_CIRCLE, Ui.GREEN, 15)
+    private val locked = IconView(context, Glyph.LOCK, Ui.TEXT, 14)
+    private val check = IconView(context, Glyph.CIRCLE, android.graphics.Color.WHITE, 22)
+    private var wasSelected = false
+    private var scaleTarget = 1f
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        image.animate().cancel()
+        image.scaleX = scaleTarget
+        image.scaleY = scaleTarget
     }
     var key: String? = null
     /** Position in the grid's flat list (for drag selection). */
@@ -53,28 +56,50 @@ class ThumbCell(context: Context) : SquareFrame(context) {
         addView(badge, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
             setMargins(dp(4), 0, 0, dp(4))
         })
-        addView(marks, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
-            setMargins(dp(4), dp(4), 0, 0)
+        marks.addView(locked, LinearLayout.LayoutParams(dp(15), dp(15)).apply { marginEnd = dp(3) })
+        marks.addView(onPhone, LinearLayout.LayoutParams(dp(15), dp(15)))
+        addView(marks, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
+            setMargins(0, 0, dp(4), dp(4))
         })
-        addView(ring, frameMatch())
-        addView(check, LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(4), dp(4), 0) })
+        addView(check, LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(5), dp(5), 0) })
         setSelected(false, false)
     }
 
     fun setSelected(selecting: Boolean, selected: Boolean) {
-        check.visibility = if (selecting && selected) View.VISIBLE else View.GONE
-        ring.background = if (selecting && selected) rounded(0x33E9A23B, 0f, dp(3), Ui.ACCENT) else null
-        image.alpha = if (selecting && !selected) 0.75f else 1f
+        check.visibility = if (selecting) View.VISIBLE else View.GONE
+        check.glyph = if (selected) Glyph.CHECK_CIRCLE else Glyph.CIRCLE
+        check.background = if (selected) rounded(Ui.ACCENT, dp(12).toFloat()) else rounded(0x33000000, dp(12).toFloat())
+        val target = if (selecting && selected) 0.9f else 1f
+        scaleTarget = target
+        // animate only where it can be seen; off screen (the page left for the darkroom) snap,
+        // or the cell would come back still shrunk
+        if (image.scaleX != target) {
+            if (isAttachedToWindow && isShown) image.animate().scaleX(target).scaleY(target).setDuration(320).setInterpolator(Ease.spring).start()
+            else { image.animate().cancel(); image.scaleX = target; image.scaleY = target }
+        }
+        image.alpha = 1f
+        if (selected && !wasSelected && selecting) check.pop(0.5f)
+        wasSelected = selected && selecting
     }
 
+    /** What is true of the picture: on the phone already, protected on the card. */
+    fun marks(imported: Boolean, protected: Boolean) {
+        onPhone.visibility = if (imported) View.VISIBLE else View.GONE
+        locked.visibility = if (protected) View.VISIBLE else View.GONE
+    }
+
+    @Deprecated("marks(imported, protected)")
     fun mark(text: String?, color: Int) {
-        marks.visibility = if (text.isNullOrEmpty()) View.GONE else View.VISIBLE
-        marks.text = text
-        marks.background = rounded(color, dp(4).toFloat())
+        marks(text?.contains("已存") == true, text?.contains("保护") == true)
     }
 
-    fun show(bitmap: Bitmap?) {
+    /** The picture: a newly loaded one fades in; a cached one is simply there. */
+    fun show(bitmap: Bitmap?, fade: Boolean = false) {
         image.setImageBitmap(bitmap)
+        if (fade && bitmap != null && !Ease.reduced(context)) {
+            image.alpha = 0f
+            image.animate().alpha(1f).setDuration(260).setInterpolator(Ease.out).start()
+        }
     }
 }
 
@@ -139,9 +164,9 @@ class SectionGrid<T>(
             val v = convertView as? LinearLayout ?: LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(context.dp(6), context.dp(16), context.dp(6), context.dp(8))
-                addView(context.label("", 13f, Ui.TEXT, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                addView(context.label("", 13f, Ui.ACCENT).apply { setPadding(context.dp(8), 0, 0, 0) })
+                setPadding(context.dp(4), context.dp(18), context.dp(4), context.dp(8))
+                addView(context.label("", Ui.HEADLINE, Ui.TEXT, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(context.label("", Ui.FOOTNOTE, Ui.ACCENT, bold = true).apply { setPadding(context.dp(8), 0, 0, 0) })
             }
             (v.getChildAt(0) as TextView).text = row.title
             val action = v.getChildAt(1) as TextView
@@ -157,8 +182,8 @@ class SectionGrid<T>(
             orientation = LinearLayout.HORIZONTAL
             repeat(columns) { i ->
                 addView(ThumbCell(context), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    if (i > 0) marginStart = context.dp(3)
-                    bottomMargin = context.dp(3)
+                    if (i > 0) marginStart = context.dp(2)
+                    bottomMargin = context.dp(2)
                 })
             }
         }

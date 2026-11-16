@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- the feel of events (a shutter click, a print developed, a roll rewound) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".App"
@@ -34,6 +36,11 @@
         </activity>
         <activity android:name=".ui.CameraPhotoActivity" android:exported="false" />
         <activity android:name=".ui.PhotoActivity" android:exported="false" />
+        <activity android:name=".ui.CameraInfoActivity" android:exported="false" />
+        <activity android:name=".ui.Cartridge3DActivity" android:exported="false" android:hardwareAccelerated="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
+        <activity android:name=".ui.LoadFilmActivity" android:exported="false" android:hardwareAccelerated="true"
+            android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".ui.ImmersiveActivity" android:exported="false"
             android:theme="@style/Immersive" />
         <service

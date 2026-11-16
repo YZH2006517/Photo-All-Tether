@@ -54,6 +54,41 @@ object CameraHub {
         private set
     @Volatile var device: DeviceInfo? = null
         private set
+    /** When this connection opened (ms), 0 when not connected. */
+    @Volatile var connectedAt = 0L
+        private set
+    /** The last transfer off the camera: MB/s, 0 before the first. */
+    @Volatile var lastSpeed = 0.0
+
+    /** The open connection's USB statistics for the info page, or null. */
+    fun usbStats(): String? {
+        val c = connection ?: return null
+        val d = usbDevice
+        return buildString {
+            d?.let { appendLine("%s（VID 0x%04X · PID 0x%04X）".format(it.productName ?: it.deviceName, it.vendorId, it.productId)) }
+            appendLine("包大小 ${c.packetSize} 字节（${if (c.packetSize >= 1024) "USB 3 SuperSpeed" else "USB 2 High Speed"}），每次传输 ${c.chunkSize / 1024} KB")
+            append("事务 ${c.transactions} 次，收到 %.1f MB".format(c.bytesIn / 1048576.0))
+            if (lastSpeed > 0) append("，最近一次传输 %.1f MB/s".format(lastSpeed))
+            appendLine()
+            append("传输错误重读 ${c.transferErrors} 次，出错后恢复 ${c.recovered} 次")
+        }
+    }
+
+    /**
+     * Reads device properties (blocking, on the camera thread's turn): code to raw value bytes.
+     * [codes] defaults to every property the camera lists.
+     */
+    fun readProps(codes: Collection<Int>? = null): Map<Int, ByteArray> {
+        val c = connection ?: return emptyMap()
+        val list = codes ?: device?.properties?.sorted() ?: return emptyMap()
+        val out = LinkedHashMap<Int, ByteArray>()
+        for (code in list) {
+            if (c.broken != null) break
+            runCatching { c.request(Ptp.GET_DEVICE_PROP_VALUE, code) }.getOrNull()?.let { out[code] = it }
+        }
+        return out
+    }
+
     /** How this maker's camera is driven (events, set-up, hints). */
     @Volatile var profile: Vendors.Profile? = null
         private set
@@ -200,6 +235,7 @@ object CameraHub {
     }
 
     private fun clearCamera() {
+        connectedAt = 0L
         device = null
         profile = null
         storages = emptyList()
@@ -272,6 +308,7 @@ object CameraHub {
                 if (p.sonyRemote) "相机内存（PC 遥控）" else null,
             ).joinToString("、"))
             refreshSettings()
+            connectedAt = System.currentTimeMillis()
             setState(State.CONNECTED, "${device?.model ?: info.model} 已连接")
             startEvents(c, gen)
             listAll(gen)
@@ -447,7 +484,10 @@ object CameraHub {
         runCatching {
             val bytes = if (info.isRaw) org.photoall.tether.engine.RawFile.embeddedJpeg(file.path) else file.readBytes()
             bytes ?: return
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = 16 }) ?: return
+            val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = 16 }) ?: return
+            val bmp = upright(raw, runCatching {
+                android.media.ExifInterface(file.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)
+            }.getOrDefault(1))
             diskThumb(info.key).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
             thumbs.put(info.key, bmp)
         }
@@ -539,6 +579,12 @@ object CameraHub {
 
     private fun newShot(info: ObjectInfo) {
         synchronized(arrivals) { arrivals += info.key }
+        // the roll's frame counter: one frame per shot (a RAW+JPEG pair counts once, by its raw)
+        if (info.isRaw) org.photoall.tether.develop.Roll.shot(app)
+        else if (info.isJpeg) main.postDelayed({
+            val now = items.firstOrNull { it.files.any { f -> f.handle == info.handle } }
+            if (now == null || now.raw == null) org.photoall.tether.develop.Roll.shot(app)
+        }, 2500)
         if (!Prefs.tether(app)) return
         val item = items.firstOrNull { it.files.any { f -> f.handle == info.handle } } ?: CameraItem(listOf(info))
         // RAW+JPEG: develop once, from the raw (the JPEG of the pair arrives first or after it)
@@ -587,30 +633,85 @@ object CameraHub {
     /** The cached thumbnail of a file, or null (then [loadThumb] fetches it). */
     fun cachedThumb(info: ObjectInfo): Bitmap? = thumbs.get(info.key)
 
-    fun loadThumb(info: ObjectInfo, done: (Bitmap?) -> Unit) {
+    /**
+     * Fetches a thumbnail, upright, and keeps it on the phone. A shot the camera is still writing
+     * has no thumbnail yet ("no thumbnail" right after ObjectAdded): asked again a few seconds
+     * later, and taken from the original when that is on the phone already.
+     */
+    fun loadThumb(info: ObjectInfo, attempt: Int = 0, done: (Bitmap?) -> Unit) {
         val key = info.key
         thumbs.get(key)?.let { done(it); return }
         if (key in noThumb || !thumbsLoading.add(key)) return
         thumbPool.execute {
+            var failed = false
             val bitmap = try {
                 val disk = diskThumb(key)
-                val bytes = disk.takeIf { it.exists() }?.readBytes() ?: connection?.request(Ptp.GET_THUMB, info.handle)
-                    ?.also { if (it.isNotEmpty()) runCatching { disk.writeBytes(it) } }
-                bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                if (disk.exists()) BitmapFactory.decodeFile(disk.path)
+                else (fromCamera(info) ?: fromOriginal(info))?.also { bmp ->
+                    runCatching { disk.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) } }
+                }
             } catch (e: Exception) {
-                if (e is PtpException) noThumb += key
+                failed = true
                 null
             } finally {
                 thumbsLoading -= key
             }
             if (bitmap != null) thumbs.put(key, bitmap)
+            else if (failed || attempt < 4) {
+                if (attempt < 4) main.postDelayed({ loadThumb(info, attempt + 1, done) }, 2500L * (attempt + 1))
+                else noThumb += key
+            }
             main.post { done(bitmap) }
         }
     }
 
-    /** A thumbnail kept on the phone for a camera file key (also used by the library). */
+    // The camera's own thumbnail, turned upright by the orientation in the file's EXIF.
+    private fun fromCamera(info: ObjectInfo): Bitmap? {
+        val c = connection ?: return null
+        if (isLocal(info.handle)) return null
+        val bytes = runCatching { c.request(Ptp.GET_THUMB, info.handle) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        return upright(bmp, orientationOf(info))
+    }
+
+    // A thumbnail from the original already on the phone (cache, or imported to the library).
+    private fun fromOriginal(info: ObjectInfo): Bitmap? {
+        val file = cachedOriginal(info) ?: return null
+        val bytes = if (info.isRaw) org.photoall.tether.engine.RawFile.embeddedJpeg(file.path) else file.readBytes()
+        bytes ?: return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 320) sample *= 2
+        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+            ?: return null
+        val o = runCatching { android.media.ExifInterface(file.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1) }
+            .getOrDefault(1)
+        return upright(bmp, o)
+    }
+
+    private val orientations = ConcurrentHashMap<String, Int>()
+
+    /**
+     * The EXIF orientation of a camera file (1 when unknown), read from its first 32 KB: a JPEG's
+     * APP1 or a raw's TIFF header carry it near the start. Thumbnails from the camera have none.
+     */
+    fun orientationOf(info: ObjectInfo): Int {
+        orientations[info.key]?.let { return it }
+        val c = connection ?: return 1
+        if (device?.supports(Ptp.GET_PARTIAL_OBJECT) != true || isLocal(info.handle)) return 1
+        val head = runCatching { c.request(Ptp.GET_PARTIAL_OBJECT, info.handle, 0, 32 * 1024) }.getOrNull() ?: return 1
+        return ExifOrientation.read(head).also { orientations[info.key] = it }
+    }
+
+    private fun upright(bmp: Bitmap, orientation: Int): Bitmap {
+        val degrees = when (orientation) { 6 -> 90f; 3 -> 180f; 8 -> 270f; else -> return bmp }
+        return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, android.graphics.Matrix().apply { postRotate(degrees) }, true)
+    }
+
+    /** A thumbnail kept on the phone for a camera file key (also used by the library), upright. */
     fun diskThumb(key: String): File =
-        File(File(app.cacheDir, "thumbs").apply { mkdirs() }, "%08x_%08x.jpg".format(key.hashCode(), key.reversed().hashCode()))
+        File(File(app.cacheDir, "thumbs2").apply { mkdirs() }, "%08x_%08x.jpg".format(key.hashCode(), key.reversed().hashCode()))
 
     /**
      * A large preview of a shot (blocking, [maxEdge] pixels at most): the camera's JPEG read
