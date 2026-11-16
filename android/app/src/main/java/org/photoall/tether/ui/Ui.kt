@@ -354,35 +354,69 @@ class IosSlider(context: Context, private val min: Float, private val max: Float
 
     private fun frac() = ((value - min) / (max - min)).coerceIn(0f, 1f)
 
+    private var downX = 0f
+    private var downY = 0f
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+
+    // A finger on the knob takes it at once. Anywhere else the slider waits: a sideways move
+    // takes it, an upright one is the page scrolling (the slider lets go and changes nothing),
+    // and a tap without moving sets the value where it landed.
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         val pad = dp(14).toFloat()
         val f = ((e.x - pad) / (width - 2 * pad)).coerceIn(0f, 1f)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                dragging = true
-                parent?.requestDisallowInterceptTouchEvent(true)
-                animate().setDuration(0)
-                ValueAnimator.ofFloat(1f, 1.18f).apply {
-                    duration = 160
-                    addUpdateListener { knobScale = it.animatedValue as Float; invalidate() }
-                    start()
+                downX = e.x
+                downY = e.y
+                val knobX = pad + (width - 2 * pad) * frac()
+                if (kotlin.math.abs(e.x - knobX) <= dp(22)) begin(f)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!dragging) {
+                    val dx = kotlin.math.abs(e.x - downX)
+                    val dy = kotlin.math.abs(e.y - downY)
+                    if (dy > slop && dy > dx) return false        // the page's scroll: let it go
+                    if (dx > slop) begin(f) else return true
                 }
                 update(f)
             }
-            MotionEvent.ACTION_MOVE -> update(f)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                dragging = false
-                ValueAnimator.ofFloat(knobScale, 1f).apply {
-                    duration = 360
-                    interpolator = Ease.bouncy
-                    addUpdateListener { knobScale = it.animatedValue as Float; invalidate() }
-                    start()
+            MotionEvent.ACTION_UP -> {
+                if (!dragging) {
+                    // a tap: jump there
+                    if (kotlin.math.abs(e.x - downX) <= slop && kotlin.math.abs(e.y - downY) <= slop) {
+                        update(f)
+                        onRelease?.invoke(value)
+                    }
+                    return true
                 }
+                end()
                 onRelease?.invoke(value)
             }
+            MotionEvent.ACTION_CANCEL -> if (dragging) { end(); onRelease?.invoke(value) }
         }
         return true
+    }
+
+    private fun begin(f: Float) {
+        dragging = true
+        parent?.requestDisallowInterceptTouchEvent(true)
+        ValueAnimator.ofFloat(1f, 1.18f).apply {
+            duration = 160
+            addUpdateListener { knobScale = it.animatedValue as Float; invalidate() }
+            start()
+        }
+        update(f)
+    }
+
+    private fun end() {
+        dragging = false
+        ValueAnimator.ofFloat(knobScale, 1f).apply {
+            duration = 360
+            interpolator = Ease.bouncy
+            addUpdateListener { knobScale = it.animatedValue as Float; invalidate() }
+            start()
+        }
     }
 
     private fun update(f: Float) {

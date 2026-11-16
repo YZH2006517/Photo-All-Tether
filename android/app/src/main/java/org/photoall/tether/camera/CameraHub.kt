@@ -313,6 +313,12 @@ object CameraHub {
             startEvents(c, gen)
             listAll(gen)
         } catch (e: Exception) {
+            // Unplugged (or switched off, or re-enumerating as it powers on) while connecting:
+            // not a fault; the attach broadcast connects again when it comes back.
+            if (gen != generation) {
+                note("连接中止：${e.message ?: e}（相机已断开，重新插上或开机后会自动连接）")
+                return
+            }
             ErrorLog.record("连接相机失败", e, usbReport(target, connection))
             if (gen == generation) {
                 connection?.abort()
@@ -443,6 +449,8 @@ object CameraHub {
                 } catch (e: InterruptedException) {
                     return@Thread
                 } catch (e: Exception) {
+                    // the camera was unplugged or this connection was replaced: just stop
+                    if (gen != generation) return@Thread
                     note("事件轮询：${e.message}")
                     ErrorLog.record("事件轮询", e, usbReport(usbDevice, c))
                     if (c.broken != null) {

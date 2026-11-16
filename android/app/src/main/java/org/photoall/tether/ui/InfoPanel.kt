@@ -54,7 +54,23 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
     private val cardText = text(12f, C.SUB, bold = true).apply { typeface = Ui.mono }
     private val cardIcon = IconView(context, Glyph.SDCARD, C.SUB, 13)
 
-    private val film = text(13f, C.ACCENT, bold = true).single()
+    // a long stock name ("Ultramax 400", "VISION3 500T") shrinks to fit rather than be cut
+    private val film = text(13f, C.ACCENT, bold = true).apply {
+        isSingleLine = true
+        addOnLayoutChangeListener { v, l, _, r, _, ol, _, or_, _ -> if (r - l != or_ - ol) fit(v as TextView) }
+    }
+
+    /** Steps the size down from 13 sp to 9 sp until the words fit the width they have. */
+    private fun fit(t: TextView) {
+        val room = t.width - t.paddingLeft - t.paddingRight
+        if (room <= 0) return
+        var size = 13f
+        t.textSize = size
+        while (size > 9f && t.paint.measureText(t.text.toString()) > room) {
+            size -= 0.5f
+            t.textSize = size
+        }
+    }
     private val frames = text(12f, C.SUB, bold = true).apply { fontFeatureSettings = "tnum" }
     private val strip = FrameStrip(context)
 
@@ -100,7 +116,7 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(IconView(context, Glyph.ROLL, C.ACCENT, 14), LinearLayout.LayoutParams(dp(14), dp(14)).apply { marginEnd = dp(5) })
-            addView(film, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(film, LinearLayout.LayoutParams(0, dp(18), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
             addView(frames, lp().apply { marginStart = dp(6) })
         }, match())
         col.addView(strip, match().apply { topMargin = dp(8) })
@@ -161,6 +177,7 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
         val loaded = Roll.film(context)
         val n = Roll.frames(context)
         film.text = if (loaded >= 0) Films.short(loaded) else "未装片"
+        fit(film)
         frames.text = "$n/${Roll.FRAMES}"
         strip.set(n, Roll.FRAMES)
 

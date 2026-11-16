@@ -158,7 +158,9 @@ class MainActivity : AdaptiveActivity() {
             nav.addView(tab, LinearLayout.LayoutParams(dp(62), dp(58)).apply { topMargin = dp(2); bottomMargin = dp(2) })
         }
         nav.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
-        // the camera at the foot: its light, its battery, the frame on the roll
+        // the camera at the foot: its light, its battery, the frame on the roll. These views live
+        // on across rotations, so out of the rail they sat in last time before going in again.
+        listOf(railDot, railState, railBattery, railFrames).forEach { (it.parent as? ViewGroup)?.removeView(it) }
         val status = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
