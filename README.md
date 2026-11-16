@@ -6,6 +6,17 @@
 
 > 当前版本 **0.0.1**，第一个可用版本。真机只测过**尼康 Z 6II**，其他品牌已按 libgphoto2 的做法适配，还没在真机上验证，见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
 
+## 下载
+
+**[下载 PhotoAll-Tether-0.0.1.apk](https://github.com/YZH2006517/Photo-All-Tether/releases/download/v0.0.1/PhotoAll-Tether-0.0.1.apk)**（57 MB）· [所有版本](https://github.com/YZH2006517/Photo-All-Tether/releases)
+
+- 在手机上打开 APK 安装，需要允许安装未知来源应用
+- Android 10（API 29）及以上，64 位 ARM（arm64-v8a），GPU 支持 Vulkan 1.1，手机支持 USB OTG
+- 这是 debug 签名的安装包，以后换了签名的版本需要先卸载再安装
+- 安装后用数据线连接相机并开机，手机弹出提示时选「Photo All 联机」并允许访问
+
+遇到问题：在应用里「设置 → 诊断 → 复制诊断报告」，粘贴到 [Issues](https://github.com/YZH2006517/Photo-All-Tether/issues)，报告不含照片。
+
 ## 功能
 
 **联机拍摄**
