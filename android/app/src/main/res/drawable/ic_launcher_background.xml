@@ -1,63 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  The film the icon is printed on: a warm near-black base, a sprocket row along the top and the
-  bottom edge, the frame's hairlines and crop marks, and the amber light leak burnt into two
-  corners. It fills the whole adaptive square, so the mask (circle, squircle, rounded square)
-  always cuts through film, as the strip runs off the edge in the reference.
--->
+<!-- Plain black: the drawing is all in the foreground's white lines. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-
-    <!-- film base -->
-    <path android:fillColor="#140E0A" android:pathData="M0,0h108v108h-108z" />
-    <!-- the frame area, a shade lighter than the edges -->
-    <path android:fillColor="#1A120C" android:pathData="M0,34h108v40h-108z" />
-
-    <!-- sprocket holes: top row and bottom row -->
-    <path android:fillColor="#E8D2B2"
-        android:pathData="M10.5,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M21,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M31.5,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M42,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M52.5,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M63,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M73.5,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M84,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M94.5,22.5h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M10.5,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M21,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M31.5,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M42,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M52.5,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M63,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M73.5,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M84,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z
-            M94.5,78h5.5a1.6,1.6 0 0 1 1.6,1.6v4.3a1.6,1.6 0 0 1 -1.6,1.6h-5.5a1.6,1.6 0 0 1 -1.6,-1.6v-4.3a1.6,1.6 0 0 1 1.6,-1.6z" />
-
-    <!-- the frame's edges and its crop marks -->
-    <path android:strokeColor="#6E4C31" android:strokeWidth="0.6"
-        android:pathData="M0,34h108M0,74h108" />
-    <path android:strokeColor="#8C6A4B" android:strokeWidth="0.45" android:strokeAlpha="0.8"
-        android:pathData="M22,41h5M24.5,38.5v5M81,41h5M83.5,38.5v5M22,67h5M24.5,64.5v5M81,67h5M83.5,64.5v5" />
-
-    <!-- light leaks: amber burnt into the top-left and bottom-right corners -->
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="14" android:centerY="18" android:gradientRadius="46">
-                <item android:offset="0" android:color="#CCD9772E" />
-                <item android:offset="0.45" android:color="#55A8541E" />
-                <item android:offset="1" android:color="#00A8541E" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="96" android:centerY="92" android:gradientRadius="40">
-                <item android:offset="0" android:color="#B3D9772E" />
-                <item android:offset="0.5" android:color="#40A8541E" />
-                <item android:offset="1" android:color="#00A8541E" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <path android:fillColor="#000000" android:pathData="M0,0h108v108h-108z" />
 </vector>

@@ -16,6 +16,25 @@ class ZoomImageView(context: Context) : ImageView(context) {
     private var scale = 1f
     var onSwipe: ((Int) -> Unit)? = null
     var onTap: (() -> Unit)? = null
+    /** Rounds the picture's own corners (where it is drawn, not the view's), in px. */
+    var cornerRadius = 0f
+        set(v) { field = v; invalidate() }
+    private val clipPath = android.graphics.Path()
+    private val shown = RectF()
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val d = drawable
+        if (cornerRadius <= 0f || d == null || d.intrinsicWidth <= 0) return super.onDraw(canvas)
+        shown.set(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
+        imageMatrix.mapRect(shown)
+        if (!shown.intersect(0f, 0f, width.toFloat(), height.toFloat())) return super.onDraw(canvas)
+        clipPath.reset()
+        clipPath.addRoundRect(shown, cornerRadius, cornerRadius, android.graphics.Path.Direction.CW)
+        canvas.save()
+        canvas.clipPath(clipPath)
+        super.onDraw(canvas)
+        canvas.restore()
+    }
 
     private val scaler = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(d: ScaleGestureDetector): Boolean {

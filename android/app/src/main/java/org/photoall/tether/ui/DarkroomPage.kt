@@ -45,6 +45,27 @@ class DarkroomPage(private val activity: MainActivity) : LinearLayout(activity),
     private var shown: List<Library.Entry> = emptyList()
     private val trayViews = LinkedHashMap<Long, Tray>()
     private val head = LinearLayout(ctx).apply { orientation = VERTICAL }
+    private val titleButtons = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+
+    // ---- landscape's left column: the latest print large, the counts, the two ways in ----------
+    private val left = LinearLayout(ctx).apply { orientation = VERTICAL }
+    private val hero = FrameLayout(ctx).apply { background = rounded(Ui.SURFACE, dp(18).toFloat()); clipToOutline = true }
+    private val heroImage = ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+    private val heroTitle = ctx.label("", Ui.SUBHEAD, android.graphics.Color.WHITE, bold = true).single()
+    private val heroSub = ctx.label("", Ui.FOOTNOTE, 0xCCFFFFFF.toInt()).single()
+    private val heroCaption = LinearLayout(ctx).apply {
+        orientation = VERTICAL
+        setPadding(dp(14), dp(28), dp(14), dp(12))
+        background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP,
+            intArrayOf(0xB3000000.toInt(), 0x00000000))
+    }
+    private val heroEmpty = LinearLayout(ctx).apply { orientation = VERTICAL; gravity = Gravity.CENTER }
+    private var heroUri: String? = null
+    private val statPrints = ctx.label("0", Ui.HEADLINE, Ui.TEXT, bold = true).apply { fontFeatureSettings = "tnum" }
+    private val statOriginals = ctx.label("0", Ui.HEADLINE, Ui.TEXT, bold = true).apply { fontFeatureSettings = "tnum" }
+    private val statToday = ctx.label("0", Ui.HEADLINE, Ui.TEXT, bold = true).apply { fontFeatureSettings = "tnum" }
+    private val stats = LinearLayout(ctx).apply { orientation = HORIZONTAL; background = rounded(Ui.SURFACE, dp(18).toFloat()) }
+    private val actionsBar = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val body = FrameLayout(ctx)
     private var arrangedWide: Boolean? = null
 
@@ -74,9 +95,12 @@ class DarkroomPage(private val activity: MainActivity) : LinearLayout(activity),
     init {
         val titleRow = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         titleRow.addView(ctx.largeTitle("暗房"), LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        titleRow.addView(ctx.iconButton(Glyph.EXPAND, Ui.ACCENT, 40, description = "沉浸模式") { ImmersiveActivity.open(ctx) })
-        titleRow.addView(ctx.iconButton(Glyph.FOLDER_PLUS, Ui.ACCENT, 40, description = "打开手机里的 RAW") { activity.pickLocal() },
-            LayoutParams(dp(40), dp(40)).apply { marginStart = dp(10) })
+        // the immersive view as a filled pill with its name; the phone's RAW beside it as a glyph
+        titleButtons.addView(ctx.button("沉浸模式", primary = true, glyph = Glyph.EXPAND) { ImmersiveActivity.open(ctx) },
+            LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)))
+        titleButtons.addView(ctx.iconButton(Glyph.FOLDER_PLUS, Ui.ACCENT, 42, description = "打开手机里的 RAW") { activity.pickLocal() },
+            LayoutParams(dp(42), dp(42)).apply { marginStart = dp(10) })
+        titleRow.addView(titleButtons)
         head.addView(titleRow, matchWrap())
         traysBox.addView(ctx.hScroll(trays), matchWrap())
         head.addView(traysBox, matchWrap().apply { topMargin = dp(14) })
@@ -84,6 +108,10 @@ class DarkroomPage(private val activity: MainActivity) : LinearLayout(activity),
 
         list.adapter = grid
         list.setPadding(0, 0, 0, dp(96))
+        // landscape: the first day's title on the line of the 成片 / 原片 switch beside it
+        kinds.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> post { alignListTop() } }
+        body.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> post { alignListTop() } }
+        hero.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> post { alignListTop() } }
         list.onDragTo = { index ->
             selection.dragTo(grid.flat, index)
             Haptic.tick(this)
@@ -97,9 +125,117 @@ class DarkroomPage(private val activity: MainActivity) : LinearLayout(activity),
         body.addView(toolbar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = dp(14)
         })
+        buildLeft()
         arrange(activity.wide)
         refreshTrays()
         refreshGrid()
+    }
+
+    private fun buildLeft() {
+        // the latest print, as large as the column allows; its recipe and when over its foot
+        hero.addView(heroImage, frameMatch())
+        heroCaption.addView(heroTitle)
+        heroCaption.addView(heroSub, matchWrap().apply { topMargin = dp(3) })
+        hero.addView(heroCaption, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        heroEmpty.addView(IconView(ctx, Glyph.PHOTO, Ui.DIM, 40), LayoutParams(dp(40), dp(40)))
+        heroEmpty.addView(ctx.label("冲好的照片会出现在这里", Ui.FOOTNOTE, Ui.SUB).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, 0) })
+        hero.addView(heroEmpty, frameMatch())
+        hero.setOnClickListener { Library.prints().firstOrNull()?.let { PhotoActivity.open(ctx, it.id, Library.PRINT) } }
+        hero.pressable(0.98f)
+        // the counts: prints, originals, today's
+        fun stat(glyph: Glyph, value: android.widget.TextView, caption: String) {
+            // one line each: the glyph, the figure, what it counts
+            stats.addView(LinearLayout(ctx).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(0, dp(11), 0, dp(11))
+                addView(IconView(ctx, glyph, Ui.ACCENT, 15), LayoutParams(dp(15), dp(15)).apply { marginEnd = dp(6) })
+                addView(value)
+                addView(ctx.label(caption, Ui.CAPTION, Ui.SUB, bold = true), LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(4) })
+            }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        stat(Glyph.PHOTO, statPrints, "成片")
+        stat(Glyph.PHOTO_STACK, statOriginals, "原片")
+        stat(Glyph.SUN, statToday, "今天")
+        // the two ways in, as one capsule (as the camera page's actions)
+        actionsBar.background = rounded(Ui.SURFACE, dp(18).toFloat())
+        // the immersive view is the main one: filled in the accent, larger, its name in full
+        fun action(glyph: Glyph, text: String, main: Boolean, onClick: () -> Unit) {
+            val fg = if (main) Ui.ON_ACCENT else Ui.ACCENT
+            actionsBar.addView(LinearLayout(ctx).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER
+                background = pressable(ctx, if (main) Ui.ACCENT else android.graphics.Color.TRANSPARENT, dp(14).toFloat())
+                val icon = if (main) 24 else 20
+                addView(IconView(ctx, glyph, fg, icon), LayoutParams(dp(icon), dp(icon)).apply { marginEnd = dp(8) })
+                addView(ctx.label(text, if (main) Ui.BODY else Ui.SUBHEAD, fg, bold = true).single())
+                contentDescription = text
+                setOnClickListener { Haptic.select(this); onClick() }
+                pressable(0.94f)
+            }, LayoutParams(0, dp(if (main) 46 else 50), if (main) 1.15f else 1f).apply { if (main) setMargins(dp(4), dp(4), 0, dp(4)) })
+        }
+        action(Glyph.EXPAND, "沉浸模式", true) { ImmersiveActivity.open(ctx) }
+        action(Glyph.FOLDER_PLUS, "手机里的 RAW", false) { activity.pickLocal() }
+    }
+
+    /**
+     * Landscape: the grid's top padding that puts its first day title's words on the middle
+     * of the 成片 / 原片 switch in the left column (portrait: none).
+     */
+    private fun alignListTop() {
+        if (arrangedWide != true || kinds.height == 0 || body.height == 0 || hero.height == 0) {
+            if (list.paddingTop != 0) list.setPadding(0, 0, 0, dp(96))
+            grid.headerBottomPx = null
+            return
+        }
+        val a = IntArray(2)
+        val b = IntArray(2)
+        val c = IntArray(2)
+        kinds.getLocationInWindow(a)
+        body.getLocationInWindow(b)
+        hero.getLocationInWindow(c)
+        val centre = a[1] + kinds.height / 2 - b[1]
+        val heroTop = c[1] - b[1]
+        // a day title: 18 dp of air above its words (SectionGrid), then the words
+        val probe = ctx.label("日", Ui.HEADLINE, bold = true)
+        probe.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+        val words = probe.measuredHeight
+        // the words on the switch's middle; the first pictures' top on the large picture's top
+        val pad = (centre - dp(18) - words / 2).coerceAtLeast(0)
+        if (list.paddingTop != pad) list.setPadding(0, pad, 0, dp(96))
+        grid.headerBottomPx = (heroTop - pad - dp(18) - words).coerceAtLeast(dp(4))
+    }
+
+    /** The latest print and the counts (landscape's left column). */
+    private fun refreshLeft() {
+        if (arrangedWide != true) return
+        val prints = Library.prints()
+        statPrints.text = prints.size.toString()
+        statOriginals.text = Library.originals().size.toString()
+        val today = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+        }.timeInMillis
+        statToday.text = prints.count { it.time >= today }.toString()
+        val latest = prints.firstOrNull()
+        heroEmpty.visibility = if (latest == null) View.VISIBLE else View.GONE
+        heroCaption.visibility = if (latest == null) View.GONE else View.VISIBLE
+        if (latest == null) { heroImage.setImageDrawable(null); heroUri = null; return }
+        heroTitle.text = latest.recipe?.let { runCatching { Recipe.fromJson(it).summary() }.getOrNull() } ?: latest.name
+        heroSub.text = SimpleDateFormat("M月d日 HH:mm", Locale.CHINA).format(Date(latest.time)) + "  ·  " + latest.name.substringBeforeLast('_')
+        if (heroUri == latest.uri) return
+        heroUri = latest.uri
+        val uri = latest.uri
+        loader.execute {
+            val bmp = runCatching {
+                ctx.contentResolver.loadThumbnail(Uri.parse(uri), Size(1200, 1200), null)
+            }.getOrNull()
+            post {
+                if (heroUri != uri || bmp == null) return@post
+                heroImage.setImageBitmap(bmp)
+                // a new print comes up as in the developer
+                heroImage.develop(1200)
+            }
+        }
     }
 
     private fun buildEmpty() {
@@ -137,18 +273,31 @@ class DarkroomPage(private val activity: MainActivity) : LinearLayout(activity),
     override fun arrange(wide: Boolean) {
         if (arrangedWide == wide) return
         arrangedWide = wide
-        listOf(head, body).forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        listOf(head, body, hero, stats, actionsBar, left).forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        left.removeAllViews()
         removeAllViews()
         if (!wide) {
             orientation = VERTICAL
             setPadding(dp(16), dp(6), dp(16), 0)
+            titleButtons.visibility = View.VISIBLE
             addView(head, matchWrap())
             addView(body, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(4) })
         } else {
+            // the left column fills the height: the title and the switch, the latest print taking
+            // what is left, the counts, and the two ways in at the foot
             orientation = HORIZONTAL
             setPadding(dp(14), dp(8), dp(14), 0)
-            addView(ScrollView(ctx).apply { isVerticalScrollBarEnabled = false; addView(head) }, LayoutParams(dp(340), ViewGroup.LayoutParams.MATCH_PARENT))
+            titleButtons.visibility = View.GONE
+            left.setPadding(0, 0, 0, dp(14))
+            left.addView(head, matchWrap())
+            left.addView(hero, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(14) })
+            left.addView(stats, matchWrap().apply { topMargin = dp(10) })
+            left.addView(actionsBar, matchWrap().apply { topMargin = dp(10) })
+            val screen = resources.displayMetrics.widthPixels / resources.displayMetrics.density
+            val column = (screen * 0.36f).toInt().coerceIn(280, 400)
+            addView(left, LayoutParams(dp(column), ViewGroup.LayoutParams.MATCH_PARENT))
             addView(body, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = dp(14) })
+            refreshLeft()
         }
     }
 
@@ -344,6 +493,7 @@ class DarkroomPage(private val activity: MainActivity) : LinearLayout(activity),
         (empty.getChildAt(1) as android.widget.TextView).text = if (prints) "还没有成片" else "还没有原片"
         (empty.getChildAt(2) as android.widget.TextView).text = if (prints) "拍一张，或打开手机里的 RAW" else "在相机页选照片导入"
         refreshSelection()
+        refreshLeft()
     }
 
     private fun bindCell(cell: ThumbCell, e: Library.Entry) {

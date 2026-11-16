@@ -26,13 +26,14 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The column beside a picture in landscape immersive view: the camera (its light,
- * name, battery, card); the roll (the stock and its 36 frames as a strip that fills); this
+ * What is going on, beside the picture in the immersive view: a column on its right in
+ * landscape, a two-column card under it in portrait ([wideCard]). The camera (its light,
+ * name, battery, card); the roll (the stock and the frame count); this
  * picture (aperture, shutter, ISO in three cells, the lens, the recipe, how long it took); and
  * at the foot the darkroom (a ring while it works). Always dark, as the view around it is.
  */
 @SuppressLint("ViewConstructor")
-class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
+class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose: () -> Unit) : FrameLayout(context) {
     private object C {
         const val TEXT = 0xFFFFFFFF.toInt()
         const val SUB = 0xFF8E8E93.toInt()
@@ -72,7 +73,6 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
         }
     }
     private val frames = text(12f, C.SUB, bold = true).apply { fontFeatureSettings = "tnum" }
-    private val strip = FrameStrip(context)
 
     private val frameTitle = sectionLabel("本张")
     private val cells = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -86,51 +86,34 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
     private val workSub = text(11f, C.SUB, bold = true).single()
 
     init {
-        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF0F0F11.toInt(), 0xFF050506.toInt()))
-        val edge = View(context).apply { setBackgroundColor(C.LINE) }
-        addView(edge, LayoutParams(1, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
-        val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false; isFillViewport = true; overScrollMode = OVER_SCROLL_NEVER }
-        col.setPadding(dp(14), dp(12), dp(12), dp(10))
-        scroll.addView(col)
-        addView(scroll, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // a rounded card, lit a little from the top, with a hairline rim
+        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF141416.toInt(), 0xFF0A0A0B.toInt())).apply {
+            cornerRadius = dp(20).toFloat()
+            setStroke(1, C.LINE)
+        }
+        clipToOutline = true
 
-        // the camera (its light and name) beside the way out; battery and card under it when there
+        // the pieces, the same in both shapes
         val top = row(camDot.also { it.layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)) }, camName, gap = 6)
         top.addView(context.iconButton(Glyph.CLOSE, C.SUB, 30, description = "退出沉浸") { onClose() }.apply {
             background = pressable(context, 0xFF1C1C1E.toInt(), dp(15).toFloat())
         }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(6) })
-        col.addView(top, match())
         val power = row(battery, batteryText, gap = 5)
         val card = row(cardIcon.also { it.layoutParams = LinearLayout.LayoutParams(dp(13), dp(13)) }, cardText, gap = 4)
-        col.addView(powerRow.apply {
+        powerRow.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(power)
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             addView(card)
-        }, match().apply { topMargin = dp(7) })
-
-        // the roll: the stock and the count on one line, the strip of frames under it
-        col.addView(rule())
-        col.addView(LinearLayout(context).apply {
+        }
+        val roll = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(IconView(context, Glyph.ROLL, C.ACCENT, 14), LinearLayout.LayoutParams(dp(14), dp(14)).apply { marginEnd = dp(5) })
             addView(film, LinearLayout.LayoutParams(0, dp(18), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
             addView(frames, lp().apply { marginStart = dp(6) })
-        }, match())
-        col.addView(strip, match().apply { topMargin = dp(8) })
-
-        // this picture
-        col.addView(rule())
-        col.addView(frameTitle)
-        col.addView(cells, match().apply { topMargin = dp(7) })
-        col.addView(recipe, match().apply { topMargin = dp(8) })
-        col.addView(lens, match().apply { topMargin = dp(3) })
-        col.addView(took, match().apply { topMargin = dp(2) })
-
-        // the darkroom, at the foot
-        col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f).apply { topMargin = dp(8) })
+        }
         val ringBox = FrameLayout(context)
         ringBox.addView(ring, LayoutParams(dp(30), dp(30)))
         ringBox.addView(ringIcon, LayoutParams(dp(14), dp(14), Gravity.CENTER))
@@ -139,16 +122,61 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
             addView(work)
             addView(workSub, lp().apply { topMargin = dp(2) })
         }
-        col.addView(LinearLayout(context).apply {
+        val darkroom = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply { setColor(C.CELL); cornerRadius = dp(16).toFloat() }
             setPadding(dp(10), dp(9), dp(10), dp(9))
             addView(ringBox, LinearLayout.LayoutParams(dp(30), dp(30)))
             addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(10) })
-        }, match())
-    }
+        }
 
+        if (!wideCard) {
+            // landscape: one column, the darkroom at its foot
+            val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false; isFillViewport = true; overScrollMode = OVER_SCROLL_NEVER }
+            col.setPadding(dp(14), dp(12), dp(12), dp(10))
+            scroll.addView(col)
+            addView(scroll, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            col.addView(top, match())
+            col.addView(powerRow, match().apply { topMargin = dp(7) })
+            col.addView(rule())
+            col.addView(roll, match())
+            col.addView(rule())
+            col.addView(frameTitle)
+            col.addView(cells, match().apply { topMargin = dp(7) })
+            col.addView(recipe, match().apply { topMargin = dp(8) })
+            col.addView(lens, match().apply { topMargin = dp(3) })
+            col.addView(took, match().apply { topMargin = dp(2) })
+            col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f).apply { topMargin = dp(8) })
+            col.addView(darkroom, match())
+        } else {
+            // portrait: a card under the picture — the camera across the top, then two columns:
+            // the camera's power and the roll and what the picture is on the left; its figures
+            // and the darkroom on the right
+            col.setPadding(dp(14), dp(10), dp(10), dp(12))
+            addView(col, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            col.addView(top, match())
+            col.addView(rule().apply { (layoutParams as LinearLayout.LayoutParams).apply { topMargin = dp(8); bottomMargin = dp(10) } })
+            val left = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            left.addView(powerRow, match())
+            left.addView(roll, match().apply { topMargin = dp(8) })
+            left.addView(recipe, match().apply { topMargin = dp(10) })
+            left.addView(lens, match().apply { topMargin = dp(3) })
+            left.addView(took, match().apply { topMargin = dp(2) })
+            val right = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            right.addView(frameTitle)
+            right.addView(cells, match().apply { topMargin = dp(6) })
+            right.addView(darkroom, match().apply { topMargin = dp(8) })
+            col.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(View(context).apply { setBackgroundColor(C.LINE) }, LinearLayout.LayoutParams(1, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                    marginStart = dp(12); marginEnd = dp(12)
+                })
+                addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.05f))
+            }, match())
+        }
+    }
 
     /** Everything again: the camera and roll as they are now, [entry] as the picture shown. */
     fun refresh(entry: Library.Entry?, index: Int, count: Int) {
@@ -179,7 +207,6 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
         film.text = if (loaded >= 0) Films.short(loaded) else "未装片"
         fit(film)
         frames.text = "$n/${Roll.FRAMES}"
-        strip.set(n, Roll.FRAMES)
 
         // this picture
         frameTitle.text = if (count > 0) "本张 · ${index + 1}/$count" else "本张"
@@ -276,68 +303,4 @@ class InfoPanel(context: Context, onClose: () -> Unit) : FrameLayout(context) {
 
     private fun lp() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     private fun match() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-}
-
-/**
- * A roll's frames as a strip: three rows of twelve, the exposed ones lit in the accent, the
- * last one exposed brightest; the rest outlined. A newly exposed frame lights up.
- */
-class FrameStrip(context: Context) : View(context) {
-    private var exposed = 0
-    private var total = 36
-    private var glow = 1f
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val r = RectF()
-
-    fun set(n: Int, of: Int) {
-        val grew = n > exposed && exposed > 0
-        exposed = n
-        total = of.coerceAtLeast(1)
-        if (grew && !Ease.reduced(context)) {
-            android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 900
-                interpolator = Ease.out
-                addUpdateListener { glow = it.animatedValue as Float; invalidate() }
-                start()
-            }
-        } else invalidate()
-    }
-
-    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(MeasureSpec.getSize(w), dp(3 * 6 + 2 * 3))
-
-    override fun onDraw(canvas: Canvas) {
-        val perRow = 12
-        val rows = (total + perRow - 1) / perRow
-        val gap = dp(3).toFloat()
-        val cw = (width - gap * (perRow - 1)) / perRow
-        val ch = dp(6).toFloat()
-        val rad = context.dp(1.5f).toFloat()
-        for (i in 0 until total) {
-            val row = i / perRow
-            val k = i % perRow
-            if (row >= rows) break
-            val x = k * (cw + gap)
-            val y = row * (ch + dp(3))
-            r.set(x, y, x + cw, y + ch)
-            when {
-                i < exposed - 1 -> {
-                    paint.style = Paint.Style.FILL
-                    paint.color = 0xB3FF9F0A.toInt()
-                    canvas.drawRoundRect(r, rad, rad, paint)
-                }
-                i == exposed - 1 -> {
-                    paint.style = Paint.Style.FILL
-                    paint.color = blend(0xFFFFFFFF.toInt(), 0xFFFF9F0A.toInt(), glow)
-                    canvas.drawRoundRect(r, rad, rad, paint)
-                }
-                else -> {
-                    paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = dp(1).toFloat()
-                    paint.color = 0x33FFFFFF
-                    r.inset(0.5f, 0.5f)
-                    canvas.drawRoundRect(r, rad, rad, paint)
-                }
-            }
-        }
-    }
 }

@@ -80,7 +80,7 @@ class SettingsPage(private val activity: MainActivity) : ScrollView(activity), A
         block("胶卷") {
             val film = Roll.film(ctx).takeIf { it >= 0 }
             addView(ctx.listRow(film?.let { Films.short(it) } ?: "未装片", "${Roll.frames(ctx)} / ${Roll.FRAMES}",
-                Glyph.ROLL, Ui.ACCENT) { film?.let { LoadFilmActivity.open(ctx, it) } })
+                Glyph.ROLL, Ui.ACCENT) { film?.let { Cartridge3DActivity.open(ctx, it) } })
             addView(ctx.separator(42))
             addView(ctx.listRow("已拍完", null, Glyph.CHECK_CIRCLE, Ui.GREEN,
                 ctx.label("${Roll.finished(ctx)} 卷", Ui.BODY, Ui.SUB)))

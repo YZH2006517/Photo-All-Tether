@@ -15,6 +15,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.TextView
+import org.json.JSONArray
+import org.json.JSONObject
 import org.photoall.tether.develop.Preview
 import org.photoall.tether.develop.Roll
 import org.photoall.tether.engine.FilmEngine
@@ -24,8 +27,9 @@ import org.photoall.tether.engine.LutCatalog
 import org.photoall.tether.engine.Recipe
 
 /**
- * The recipe: the latest raw developed small with it, the stock's cartridge turning above a
- * carousel of films, then paper, look, light, texture and noise as grouped rows, and every other
+ * The recipe: the latest raw developed small with it; the films and the papers as rows of 3D
+ * models to swipe through (the one in the middle is the one); then printing, look, light,
+ * texture and noise as grouped rows, and every other
  * parameter of the engine folded below.
  */
 class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Arrangeable {
@@ -44,9 +48,17 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
     private val dynamic = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
     private val heading = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val frame = FrameLayout(ctx).apply { background = rounded(Ui.SURFACE, dp(18).toFloat()); clipToOutline = true }
-    private val cartridge = CartridgeView(ctx, recipe.film, 1f).apply { onTap = { Cartridge3DActivity.open(ctx, recipe.film) } }
-    private val stage = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-    private var filmStrip: HorizontalScrollView? = null
+    // the films above, the papers below: rows of 3D models to swipe through, each name under its row
+    private val filmRow = CarouselView(ctx, false, JSONArray().apply {
+        for (i in 0 until runCatching { FilmEngine.filmStocks.size }.getOrDefault(0)) put(JSONObject(FilmLook.json(FilmLook.of(i))))
+    }, recipe.film)
+    private val paperRow = CarouselView(ctx, true, PaperLook.all(), recipe.paper, footDp = paperFootDp())
+    /** The papers' row and its name over its foot: the row draws on under the name, so turning corners and shadows show. */
+    private val paperBox = FrameLayout(ctx)
+    private val filmName = ctx.label("", Ui.SUBHEAD, Ui.ACCENT, bold = true).single().apply { gravity = Gravity.CENTER }
+    private val paperName = ctx.label("", Ui.SUBHEAD, Ui.ACCENT, bold = true).single().apply { gravity = Gravity.CENTER }
+    /** Landscape: the right column's first screen (the films over the papers). */
+    private val showcase = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
     private val previewListener: () -> Unit = { renderPreview() }
     private var arrangedWide: Boolean? = null
     private var firstRender = true
@@ -68,64 +80,143 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
         frame.addView(previewEmpty, frameMatch())
         frame.addView(previewSpinner, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(12), dp(12), 0) })
 
-        // the stock's cartridge, and the two ways to hold it
-        val stageButtons = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(ctx.iconButton(Glyph.CUBE, Ui.ACCENT, 44, description = "3D 细看") { Cartridge3DActivity.open(ctx, recipe.film) })
-            addView(ctx.iconButton(Glyph.ROLL, Ui.ACCENT, 44, description = "装进相机") { LoadFilmActivity.open(ctx, recipe.film) },
-                LinearLayout.LayoutParams(dp(44), dp(44)).apply { topMargin = dp(12) })
-        }
-        val stageRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        stageRow.addView(View(ctx), LinearLayout.LayoutParams(dp(44), 1))
-        stageRow.addView(cartridge, LinearLayout.LayoutParams(0, dp(200), 1f))
-        stageRow.addView(stageButtons, LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.WRAP_CONTENT))
-        stage.addView(stageRow, matchWrap())
+        filmRow.onCenter = { i -> name(filmName, Films.short(i), i == recipe.film && recipe.filmOn) }
+        filmRow.onSelect = { i -> if (i != recipe.film || !recipe.filmOn) update(rebuild = true) { it.copy(film = i, filmOn = true) } }
+        filmRow.onOpen = { i -> Cartridge3DActivity.open(ctx, i) }
+        paperRow.onCenter = { i -> name(paperName, Films.paperShort(i), i == recipe.paper && recipe.printOn) }
+        paperRow.onSelect = { i -> if (i != recipe.paper || !recipe.printOn) update(rebuild = true) { it.copy(paper = i, printOn = true, filmOn = true) } }
+        filmName.text = Films.short(recipe.film)
+        paperName.text = Films.paperShort(recipe.paper)
         arrange(activity.wide)
         build()
     }
 
     /**
-     * Portrait: the picture on top, the cartridge and the controls under it in one scroll.
-     * Landscape: the picture large on the left staying put; the cartridge and controls beside it.
+     * Portrait: the picture on top, the films and the papers under it, the controls after, in
+     * one scroll. Landscape: the picture large on the left staying put; on the right a first
+     * screen of the films over the papers — the papers standing on the line of the picture's
+     * foot, their name on the line of the picture's caption — and the controls scrolling up
+     * under it.
      */
     override fun arrange(wide: Boolean) {
         if (arrangedWide == wide) return
+        val again = arrangedWide != null
         arrangedWide = wide
-        listOf(heading, summary, frame, stage, dynamic, content).forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        listOf(heading, summary, frame, filmRow, filmName, paperBox, showcase, dynamic, content)
+            .forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        if (paperBox.childCount == 0) {
+            paperBox.addView(paperRow, frameMatch())
+            paperBox.addView(paperName, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        }
         content.removeAllViews()
+        showcase.removeAllViews()
         removeAllViews()
         if (!wide) {
             content.setPadding(dp(16), dp(6), dp(16), dp(48))
             content.addView(heading, matchWrap())
             content.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)).apply { topMargin = dp(10) })
             content.addView(summary, matchWrap().apply { topMargin = dp(10) })
-            content.addView(stage, matchWrap().apply { topMargin = dp(4) })
+            content.addView(filmRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)).apply {
+                topMargin = dp(8); marginStart = -dp(16); marginEnd = -dp(16)
+            })
+            content.addView(filmName, matchWrap().apply { topMargin = dp(2) })
+            content.addView(paperBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(160 + paperFootDp())).apply {
+                topMargin = dp(14); marginStart = -dp(16); marginEnd = -dp(16)
+            })
             content.addView(dynamic)
-            addView(ScrollView(ctx).apply { isFillViewport = true; addView(content) }, frameMatch())
+            val scroll = ScrollView(ctx).apply { isFillViewport = true; addView(content) }
+            // the first screen holds the picture and both rows whole, whatever the phone's height
+            // (or its display size): their heights are shares of what the screen has
+            scroll.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.post { fitPortrait(v.height) } }
+            addView(scroll, frameMatch())
         } else {
             val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
             val left = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(8), dp(8), dp(14))
+                setPadding(dp(14), dp(8), dp(8), BOTTOM)
                 addView(heading, matchWrap())
                 addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(10) })
-                addView(summary, matchWrap().apply { topMargin = dp(10) })
+                addView(summary, matchWrap().apply { topMargin = CAPTION_GAP })
             }
             row.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.2f))
             content.setPadding(dp(8), dp(8), dp(16), dp(48))
-            content.addView(stage, matchWrap())
+            // the first screen: films over papers, each its name under it; the papers' row ends
+            // on the picture's foot and its name sits on the picture's caption line
+            showcase.addView(filmRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f).apply {
+                marginStart = -dp(8); marginEnd = -dp(16)
+            })
+            showcase.addView(filmName, matchWrap().apply { topMargin = dp(2) })
+            // the papers' row runs down to the column's foot, its name over it at the bottom: the
+            // models stand on the picture's foot line, the name on the picture's caption line
+            showcase.addView(paperBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+                topMargin = dp(6); marginStart = -dp(8); marginEnd = -dp(16)
+            })
+            content.addView(showcase, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)))
             content.addView(dynamic)
-            row.addView(ScrollView(ctx).apply { addView(content) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            val scroll = ScrollView(ctx).apply { isVerticalScrollBarEnabled = false; addView(content) }
+            // as tall as the screen less the same top and foot as the left column
+            scroll.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                val h = v.height - content.paddingTop - BOTTOM
+                if (h > 0 && showcase.layoutParams.height != h) v.post { showcase.layoutParams = showcase.layoutParams.apply { height = h } }
+            }
+            row.addView(scroll, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             addView(row, frameMatch())
         }
+        if (again) build()
     }
+
+    /** A row's name changes: the old slides out, the new in; the chosen one in the accent. */
+    private fun name(view: TextView, text: String, chosen: Boolean) {
+        view.setTextColor(if (chosen) Ui.ACCENT else Ui.SUB)
+        if (view.text == text) return
+        if (Ease.reduced(ctx)) { view.text = text; return }
+        view.animate().cancel()
+        view.animate().alpha(0f).translationY(-dp(4).toFloat()).setDuration(90).withEndAction {
+            view.text = text
+            view.translationY = dp(4).toFloat()
+            view.animate().alpha(1f).translationY(0f).setDuration(160).setInterpolator(Ease.out).start()
+        }.start()
+    }
+
+    private val BOTTOM get() = dp(14)
+
+    /**
+     * Portrait: shares out the screen's height (less the title, the captions and the gaps)
+     * between the picture, the films and the papers, so all three are whole on opening.
+     */
+    private fun fitPortrait(screen: Int) {
+        if (arrangedWide != false || screen <= 0 || heading.height == 0) return
+        val foot = dp(paperFootDp())
+        val fixed = content.paddingTop + heading.height + dp(10) + dp(10) + summary.height +
+            dp(8) + dp(2) + filmName.height + dp(14) + foot + dp(12)
+        val flex = (screen - fixed).coerceAtLeast(dp(380))
+        val frameH = (flex * 0.40f).toInt().coerceIn(dp(140), dp(260))
+        val filmH = (flex * 0.32f).toInt().coerceIn(dp(120), dp(210))
+        val paperH = (flex - frameH - filmH).coerceIn(dp(100), dp(180))
+        fun set(v: View, h: Int) {
+            val lp = v.layoutParams ?: return
+            if (lp.height != h) { lp.height = h; v.layoutParams = lp }
+        }
+        set(frame, frameH)
+        set(filmRow, filmH)
+        set(paperBox, paperH + foot)
+    }
+
+    /** The name's height and the gap above it, in dp: where the papers stand above the row's foot. */
+    private fun paperFootDp(): Int {
+        val probe = ctx.label("Endura", Ui.SUBHEAD, bold = true).single()
+        probe.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+        return Math.round(probe.measuredHeight / resources.displayMetrics.density) + 10
+    }
+    private val CAPTION_GAP get() = dp(10)
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         Preview.addListener(previewListener)
         recipe = Recipe.load(ctx)
-        cartridge.setFilm(recipe.film, false)
+        filmRow.go(recipe.film, false)
+        paperRow.go(recipe.paper, false)
         build()
         renderPreview()
     }
@@ -141,9 +232,12 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
         Recipe.save(ctx, recipe)
         summary.text = recipe.summary()
         if (recipe.film != before.film) {
-            cartridge.setFilm(recipe.film, true)
+            filmRow.go(recipe.film)
             Roll.follow(ctx, recipe.film)
         }
+        if (recipe.paper != before.paper) paperRow.go(recipe.paper)
+        name(filmName, Films.short(recipe.film), recipe.filmOn)
+        name(paperName, Films.paperShort(recipe.paper), recipe.filmOn && recipe.printOn)
         if (rebuild) build()
         renderPreview()
     }
@@ -173,22 +267,6 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
         val r = recipe
         summary.text = r.summary()
 
-        // the film carousel
-        val films = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(2), dp(6), dp(2), dp(10)) }
-        val count = runCatching { FilmEngine.filmStocks.size }.getOrDefault(0)
-        for (i in 0 until count) films.addView(FilmCard(i, i == r.film && r.filmOn),
-            LinearLayout.LayoutParams(dp(124), dp(156)).apply { marginEnd = dp(10) })
-        // the carousel runs to the screen's edges, its first and last cards on the page's margin
-        films.setPadding(dp(16), dp(6), dp(16), dp(10))
-        val strip = ctx.hScroll(films)
-        val bleed = if (arrangedWide == true) dp(8) else dp(16)
-        dynamic.addView(strip, matchWrap().apply { marginStart = -bleed; marginEnd = -dp(16) })
-        filmStrip = strip
-        strip.post {
-            val sel = films.getChildAt(r.film) ?: return@post
-            strip.scrollTo((sel.left - (strip.width - sel.width) / 2).coerceAtLeast(0), 0)
-        }
-
         // film and paper
         dynamic.addView(ctx.section("胶片与相纸"))
         val stock = ctx.card()
@@ -196,16 +274,6 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
         if (r.filmOn) {
             stock.addView(ctx.separator(42))
             stock.addView(ctx.toggleRow("印放到相纸", null, r.printOn, Glyph.PHOTO, Ui.INDIGO) { on -> update(rebuild = true) { it.copy(printOn = on) } })
-            if (r.printOn) {
-                val papers = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, dp(10)) }
-                for (i in 0 until runCatching { FilmEngine.papers.size }.getOrDefault(0)) {
-                    papers.addView(Chip(ctx, Films.paperShort(i)).apply {
-                        on = i == r.paper
-                        onClick = { update(rebuild = true) { it.copy(paper = i) } }
-                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
-                }
-                stock.addView(ctx.hScroll(papers))
-            }
             stock.addView(ctx.separator(42))
             stock.addView(ctx.listRow("放大机滤色", null, Glyph.CONTRAST, Ui.TEAL))
             stock.addView(Segmented(ctx, Recipe.balanceNames.map { it.removePrefix("保留") }, r.balance.coerceIn(0, 2)) { i ->
@@ -273,61 +341,6 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
         for (group in FilmParamsCatalog.groups) dynamic.addView(advancedGroup(group), matchWrap().apply { bottomMargin = dp(8) })
     }
 
-    /**
-     * A film in the carousel: its box's colours as a band, the name, the speed large, a glyph for
-     * its kind. The chosen one stands out (larger, ringed); choosing turns the cartridge.
-     */
-    private inner class FilmCard(val index: Int, chosen: Boolean) : LinearLayout(ctx) {
-        init {
-            val look = FilmLook.of(index)
-            orientation = VERTICAL
-            background = rounded(Ui.SURFACE, dp(16).toFloat(), if (chosen) dp(2) else 0, Ui.ACCENT)
-            clipToOutline = true
-            addView(object : View(ctx) {
-                private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-                private val r = RectF()
-                override fun onDraw(c: Canvas) {
-                    p.color = look.base
-                    c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
-                    p.color = look.band
-                    c.drawRect(0f, 0f, width.toFloat(), height * 0.3f, p)
-                    c.drawRect(0f, height * 0.86f, width.toFloat(), height.toFloat(), p)
-                    p.color = look.ink
-                    p.textSize = height * 0.34f
-                    p.typeface = Ui.bold
-                    p.textAlign = Paint.Align.CENTER
-                    c.drawText(look.iso, width / 2f, height * 0.73f, p)
-                    r.set(0f, 0f, 0f, 0f)
-                }
-            }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
-            val text = LinearLayout(ctx).apply {
-                orientation = VERTICAL
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                addView(ctx.label(Films.short(index), Ui.SUBHEAD, Ui.TEXT, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.05f) })
-                val row = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                row.addView(IconView(ctx, kindGlyph(index), if (chosen) Ui.ACCENT else Ui.SUB, 14), LayoutParams(dp(14), dp(14)).apply { marginEnd = dp(5) })
-                row.addView(ctx.label(Films.kind(index), Ui.CAPTION, Ui.SUB, bold = true).single())
-                addView(row, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5) })
-            }
-            addView(text, matchWrap())
-            if (!chosen) { scaleX = 0.94f; scaleY = 0.94f; alpha = 0.85f }
-            contentDescription = Films.name(index)
-            setOnClickListener {
-                if (index == recipe.film && recipe.filmOn) { Cartridge3DActivity.open(ctx, index); return@setOnClickListener }
-                Haptic.select(this)
-                update(rebuild = true) { it.copy(film = index, filmOn = true) }
-            }
-            pressable()
-        }
-    }
-
-    private fun kindGlyph(i: Int): Glyph = when (Films.kind(i)) {
-        "黑白" -> Glyph.CONTRAST
-        "反转片" -> Glyph.SUN
-        "电影负片" -> Glyph.CAMERA
-        else -> Glyph.FILM
-    }
-
     /** One folded group of advanced parameters: a header (with what changed) and its sliders. */
     private fun advancedGroup(group: FilmParamsCatalog.Group): View {
         val box = ctx.card()
@@ -391,19 +404,16 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
         return box
     }
 
-    private fun pickLut() {
-        LutCatalog.load(ctx)
-        val groups = listOf("无 LUT") + LutCatalog.groups()
-        AlertDialog.Builder(ctx).setTitle("风格 LUT").setItems(groups.toTypedArray()) { _, g ->
-            if (g == 0) {
-                update(rebuild = true) { it.copy(lut = null) }
-                return@setItems
-            }
-            val luts = LutCatalog.all.filter { it.group == groups[g] }
-            AlertDialog.Builder(ctx).setTitle(groups[g]).setItems(luts.map { it.label }.toTypedArray()) { _, i ->
-                update(rebuild = true) { it.copy(lut = luts[i].id, lutOn = true) }
-            }.setNegativeButton("返回") { _, _ -> pickLut() }.show()
-        }.show()
+    /** The LUT page: every LUT as a small print of the latest picture, import and manage. */
+    private fun pickLut() = LutActivity.open(ctx)
+
+    /** Back from a page that changed the recipe (the LUT page): show it as it is now. */
+    fun reload() {
+        val now = Recipe.load(ctx)
+        if (now.toJson().toString() == recipe.toJson().toString()) return
+        recipe = now
+        build()
+        renderPreview()
     }
 }
 

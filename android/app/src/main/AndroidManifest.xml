@@ -34,15 +34,15 @@
             <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/usb_device_filter" />
         </activity>
-        <activity android:name=".ui.CameraPhotoActivity" android:exported="false" />
-        <activity android:name=".ui.PhotoActivity" android:exported="false" />
-        <activity android:name=".ui.CameraInfoActivity" android:exported="false" />
-        <activity android:name=".ui.Cartridge3DActivity" android:exported="false" android:hardwareAccelerated="true"
+        <activity android:name=".ui.CameraPhotoActivity" android:exported="false" android:screenOrientation="behind" />
+        <activity android:name=".ui.PhotoActivity" android:exported="false" android:screenOrientation="behind" />
+        <activity android:name=".ui.CameraInfoActivity" android:exported="false" android:screenOrientation="behind" />
+        <activity android:name=".ui.LutActivity" android:exported="false" android:screenOrientation="behind"
+            android:windowSoftInputMode="adjustNothing" />
+        <activity android:name=".ui.Cartridge3DActivity" android:exported="false" android:hardwareAccelerated="true" android:screenOrientation="behind"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
-        <activity android:name=".ui.LoadFilmActivity" android:exported="false" android:hardwareAccelerated="true"
-            android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".ui.ImmersiveActivity" android:exported="false"
-            android:theme="@style/Immersive" />
+            android:theme="@style/Immersive" android:screenOrientation="behind" />
         <service
             android:name=".camera.TetherService"
             android:exported="false"

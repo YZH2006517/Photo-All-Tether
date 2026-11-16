@@ -1,69 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  On the film: a camera drawn in cream line, its cable glowing amber down and across to a phone,
-  three chevrons for the picture on its way, and on the phone's screen the picture as a small
-  frame of film (a sunset) over a transfer bar. Kept inside the adaptive icon's safe circle.
+  In a few white lines: a camera, its cable, a phone with a frame of film on its screen. No fills,
+  so it is also the themed (monochrome) icon. Inside the adaptive icon's safe circle.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
 
-    <!-- the cable: a soft amber glow under a bright core -->
-    <path android:strokeColor="#E07A2E" android:strokeAlpha="0.4" android:strokeWidth="3.2"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M56,59h1.5c3.5,0 2.5,12.5 8.5,12.5h8.5c1.7,0 2.5,-1.4 2.5,-3v-1.5" />
-    <path android:strokeColor="#F0C18E" android:strokeWidth="1.1"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M56,59h1.5c3.5,0 2.5,12.5 8.5,12.5h8.5c1.7,0 2.5,-1.4 2.5,-3v-1.5" />
+    <!-- the camera: body and prism in one outline, the lens -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeLineJoin="round"
+        android:pathData="M29,47h6l3,-5h8l3,5h6a3,3 0 0 1 3,3v13a3,3 0 0 1 -3,3h-26a3,3 0 0 1 -3,-3v-13a3,3 0 0 1 3,-3z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2"
+        android:pathData="M42,49.5a6.5,6.5 0 1 1 0,13a6.5,6.5 0 1 1 0,-13z" />
 
-    <!-- the camera: body, prism, dials, the band of leatherette -->
-    <path android:fillColor="#120C08" android:strokeColor="#F2D7B1" android:strokeWidth="1.3" android:strokeLineJoin="round"
-        android:pathData="M28,44.6h4v2.4h-4zM49,44.6h5v2.4h-5z" />
-    <path android:fillColor="#120C08" android:strokeColor="#F2D7B1" android:strokeWidth="1.3" android:strokeLineJoin="round"
-        android:pathData="M34,47l2.5,-5.2h8l2.5,5.2z" />
-    <path android:fillColor="#120C08" android:strokeColor="#F2D7B1" android:strokeWidth="1.3"
-        android:pathData="M27,47h27a2,2 0 0 1 2,2v14a2,2 0 0 1 -2,2h-27a2,2 0 0 1 -2,-2v-14a2,2 0 0 1 2,-2z" />
-    <path android:strokeColor="#F2D7B1" android:strokeWidth="0.6" android:strokeAlpha="0.7"
-        android:pathData="M25.5,51h30M25.5,62.5h30" />
+    <!-- the cable, down and across to the phone -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M58,60h1c4,0 3,11 9,11h6c2,0 3,-1.2 3,-3" />
 
-    <!-- the lens: barrel, glass, a glint -->
-    <path android:fillColor="#0E0906" android:strokeColor="#F2D7B1" android:strokeWidth="1.3"
-        android:pathData="M40.5,49.8a7.2,7.2 0 1 1 0,14.4a7.2,7.2 0 1 1 0,-14.4z" />
-    <path android:strokeColor="#F2D7B1" android:strokeWidth="0.8" android:strokeAlpha="0.85"
-        android:pathData="M40.5,52.6a4.4,4.4 0 1 1 0,8.8a4.4,4.4 0 1 1 0,-8.8z" />
-    <path android:strokeColor="#E9A25B" android:strokeWidth="0.8" android:strokeLineCap="round"
-        android:pathData="M37.8,55.2a3.2,3.2 0 0 1 2.4,-1.6" />
-
-    <!-- on its way -->
-    <path android:strokeColor="#E9A25B" android:strokeWidth="1.1" android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M59.5,49l2,2l-2,2M62.5,49l2,2l-2,2M65.5,49l2,2l-2,2" />
-
-    <!-- the phone -->
-    <path android:fillColor="#110B07" android:strokeColor="#F2D7B1" android:strokeWidth="1.3"
-        android:pathData="M73,40h8a3,3 0 0 1 3,3v21a3,3 0 0 1 -3,3h-8a3,3 0 0 1 -3,-3v-21a3,3 0 0 1 3,-3z" />
-    <path android:fillColor="#F2D7B1" android:pathData="M77,41.7a0.6,0.6 0 1 1 0,1.2a0.6,0.6 0 1 1 0,-1.2z" />
-
-    <!-- on its screen: the picture as a frame of film -->
-    <path android:fillColor="#2A1C12" android:strokeColor="#F2D7B1" android:strokeWidth="0.5"
-        android:pathData="M72.3,46.5h9.4v9.5h-9.4z" />
-    <path android:pathData="M72.6,48.8h8.8v4.9h-8.8z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="0" android:startY="48.8" android:endX="0" android:endY="53.7">
-                <item android:offset="0" android:color="#4A2E1C" />
-                <item android:offset="0.6" android:color="#D98A45" />
-                <item android:offset="1" android:color="#7A4524" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:fillColor="#F6C886" android:pathData="M78.8,51.6a0.8,0.8 0 1 1 0,1.6a0.8,0.8 0 1 1 0,-1.6z" />
-    <path android:fillColor="#1A110B" android:pathData="M72.6,53.7v-1.1c1.2,-0.9 2.2,-0.4 3,-0.9c0.9,-0.6 1.6,-0.2 2.4,0.3c1.1,0.6 2.3,-0.2 3.4,0.2v1.5z" />
-    <path android:fillColor="#F2D7B1"
-        android:pathData="M73.2,47.2h1v0.9h-1zM75.2,47.2h1v0.9h-1zM77.2,47.2h1v0.9h-1zM79.2,47.2h1v0.9h-1z
-            M73.2,54.5h1v0.9h-1zM75.2,54.5h1v0.9h-1zM77.2,54.5h1v0.9h-1zM79.2,54.5h1v0.9h-1z" />
-
-    <!-- the transfer bar -->
-    <path android:strokeColor="#F2D7B1" android:strokeWidth="0.45"
-        android:pathData="M73.15,59.5h7.7a0.85,0.85 0 0 1 0,1.7h-7.7a0.85,0.85 0 0 1 0,-1.7z" />
-    <path android:fillColor="#E9A25B"
-        android:pathData="M73.15,59.75h4.9v1.2h-4.9a0.6,0.6 0 0 1 0,-1.2z" />
+    <!-- the phone, a frame of film on its screen -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2"
+        android:pathData="M73,41h8a3,3 0 0 1 3,3v21a3,3 0 0 1 -3,3h-8a3,3 0 0 1 -3,-3v-21a3,3 0 0 1 3,-3z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.2"
+        android:pathData="M73.5,48.5h7v10h-7zM73.5,50.5h7M73.5,56.5h7" />
 </vector>

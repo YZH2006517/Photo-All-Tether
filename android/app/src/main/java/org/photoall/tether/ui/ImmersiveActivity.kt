@@ -22,6 +22,7 @@ import org.photoall.tether.camera.CameraHub
 import org.photoall.tether.develop.DevelopQueue
 import org.photoall.tether.develop.Library
 import org.photoall.tether.develop.Prefs
+import org.photoall.tether.engine.Films
 import org.photoall.tether.engine.Recipe
 import java.util.concurrent.Executors
 
@@ -52,6 +53,8 @@ class ImmersiveActivity : AdaptiveActivity() {
     private val rollListener: (org.photoall.tether.develop.Roll.Event) -> Unit = { hubListener() }
     /** Landscape only: the column of data beside the picture. */
     private var panel: InfoPanel? = null
+    /** The opening is playing: the picture stays hidden until it comes up at its end. */
+    private var introRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +65,9 @@ class ImmersiveActivity : AdaptiveActivity() {
         image = ZoomImageView(this)
         image.onSwipe = { go(index + it) }
         image.onTap = { toggleCaption() }
+        // the picture's corners a little rounded, as a print's
+        image.cornerRadius = dp(14).toFloat()
+        fade.cornerRadius = dp(14).toFloat()
         root.addView(fade, frameMatch())
         root.addView(image, frameMatch())
 
@@ -107,19 +113,90 @@ class ImmersiveActivity : AdaptiveActivity() {
             row.addView(root, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 4f))
             val p = InfoPanel(this) { finish() }
             panel = p
-            row.addView(p, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            // the column as a rounded card a little off the edges
+            row.addView(p, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                setMargins(dp(8), dp(8), dp(8), dp(8))
+            })
             setContentView(row)
             padForSystemBars(row)
-        } else setContentView(root)
+        } else {
+            // portrait: the picture above, the same data as a two-column card under it
+            caption.visibility = View.GONE
+            image.onTap = { togglePanel() }
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF000000.toInt()) }
+            column.addView(root, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            val p = InfoPanel(this, wideCard = true) { finish() }
+            panel = p
+            column.addView(p, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(dp(8), dp(8), dp(8), dp(8))
+            })
+            setContentView(column)
+            padForSystemBars(column)
+        }
         hideBars()
         prints = Library.prints()
         index = savedInstanceState?.getInt("index") ?: 0
         if (prints.isNotEmpty()) go(index.coerceIn(0, prints.lastIndex), animate = false) else showEmpty()
+        // arriving (not turning round): the opening with the cartridge; turned round while it
+        // played (the page was built again): it plays again, whole
+        val introAgain = savedInstanceState?.getBoolean(KEY_INTRO) == true
+        if ((savedInstanceState == null || introAgain) && !Ease.reduced(this)) playIntro()
+    }
+
+    /**
+     * The opening: on black, the stock's 3D cartridge comes in from far off, spinning, the
+     * camera closing on it; the film is drawn out of its lips (felt as a click); then the
+     * cartridge rushes past and the picture comes up behind it. A tap skips it.
+     */
+    private fun playIntro() {
+        val decor = window.decorView as? ViewGroup ?: return
+        val film = prints.firstOrNull()?.recipe?.let { runCatching { Recipe.fromJson(it).film }.getOrNull() }
+            ?: org.photoall.tether.develop.Roll.film(this).takeIf { it >= 0 } ?: Recipe.load(this).film
+        val overlay = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()); isClickable = true }
+        val side = (minOf(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels) * 0.7f).toInt()
+        val cart = CartridgeView(this, film, 1f)
+        overlay.addView(cart, FrameLayout.LayoutParams(side, side, Gravity.CENTER))
+        val name = label(Films.short(film), 13f, 0xFF8E8E93.toInt(), bold = true).apply { alpha = 0f; letterSpacing = 0.12f }
+        overlay.addView(name, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(36) })
+        decor.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // the picture waits a little back and dim, to come up when the cartridge goes
+        listOf(image, fade).forEach { it.scaleX = 0.94f; it.scaleY = 0.94f }
+        image.alpha = 0f
+
+        var done = false
+        var ready = false
+        introRunning = true
+        fun finishIntro() {
+            if (done) return
+            done = true
+            introRunning = false
+            cart.animate().scaleX(1.5f).scaleY(1.5f).alpha(0f).setDuration(420).setInterpolator(Ease.out).start()
+            name.animate().alpha(0f).setDuration(200).start()
+            overlay.animate().alpha(0f).setStartDelay(160).setDuration(520).setInterpolator(Ease.out).withEndAction {
+                cart.destroy()
+                decor.removeView(overlay)
+            }.start()
+            listOf(image, fade).forEach { it.animate().scaleX(1f).scaleY(1f).setStartDelay(160).setDuration(700).setInterpolator(Ease.spring).start() }
+            image.animate().alpha(1f).setStartDelay(160).setDuration(520).start()
+        }
+        cart.onReady = {
+            ready = true
+            cart.intro()
+            name.animate().alpha(1f).setStartDelay(500).setDuration(600).start()
+            overlay.postDelayed({ if (!done) Haptic.tick(overlay) }, 950)
+            overlay.postDelayed({ finishIntro() }, 2100)
+        }
+        overlay.setOnClickListener { finishIntro() }
+        // the model never came (no WebGL): don't keep the picture waiting
+        overlay.postDelayed({ if (!ready) finishIntro() }, 2500)
+        overlay.postDelayed({ finishIntro() }, 4500)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("index", index)
+        outState.putBoolean(KEY_INTRO, introRunning)
     }
 
     override fun onStart() {
@@ -240,7 +317,7 @@ class ImmersiveActivity : AdaptiveActivity() {
             image.animate().alpha(1f).setDuration(350).start()
             fade.animate().alpha(0f).setDuration(350).start()
         } else {
-            image.alpha = 1f
+            image.alpha = if (introRunning) 0f else 1f
             image.setImageBitmap(bitmap)
         }
     }
@@ -275,14 +352,17 @@ class ImmersiveActivity : AdaptiveActivity() {
     private fun togglePanel() {
         val p = panel ?: return
         Haptic.tick(p)
+        // landscape: off to the right; portrait: down off the foot
+        val side = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         if (p.visibility == View.VISIBLE) {
-            p.animate().translationX(p.width.toFloat()).alpha(0f).setDuration(260).setInterpolator(Ease.out)
-                .withEndAction { p.visibility = View.GONE }.start()
+            val a = p.animate().alpha(0f).setDuration(260).setInterpolator(Ease.out)
+            if (side) a.translationX(p.width.toFloat()) else a.translationY(p.height.toFloat())
+            a.withEndAction { p.visibility = View.GONE }.start()
         } else {
             p.visibility = View.VISIBLE
-            p.translationX = dp(80).toFloat()
+            if (side) p.translationX = dp(80).toFloat() else p.translationY = dp(80).toFloat()
             p.alpha = 0f
-            p.animate().translationX(0f).alpha(1f).setDuration(460).setInterpolator(Ease.spring).start()
+            p.animate().translationX(0f).translationY(0f).alpha(1f).setDuration(460).setInterpolator(Ease.spring).start()
         }
     }
 
@@ -304,6 +384,7 @@ class ImmersiveActivity : AdaptiveActivity() {
         /** True while the immersive view is on screen. */
         @Volatile var showing = false
             private set
+        private const val KEY_INTRO = "intro"
         private val loader = Executors.newSingleThreadExecutor()
         private val cache = object : LruCache<String, Bitmap>(96 * 1024 * 1024) {
             override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount

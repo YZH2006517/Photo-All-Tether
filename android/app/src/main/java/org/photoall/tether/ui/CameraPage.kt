@@ -47,6 +47,8 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
         background = rounded(Ui.SURFACE, dp(18).toFloat())
         setPadding(dp(12), dp(10), dp(14), dp(12))
     }
+    /** The cartridge and the name: in landscape it takes the card's spare height, the cartridge grown into it. */
+    private val statusTop = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val statusLine = View(ctx).apply { setBackgroundColor(Ui.LINE) }
     private val storageBox = LinearLayout(ctx).apply { orientation = VERTICAL }
     private val apertureIcon = IconView(ctx, Glyph.APERTURE, Ui.ACCENT, 16)
@@ -54,7 +56,17 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
     // ---- actions ----------------------------------------------------------------------------------
     private val connectButton = ctx.iconButton(Glyph.CABLE, Ui.ACCENT, 42, description = "连接相机") { onConnectButton() }
     private val autoButton = ctx.iconButton(Glyph.BOLT, Ui.ACCENT, 42, description = "联机自动冲洗") { toggleAuto() }
-    private val immersiveButton = ctx.iconButton(Glyph.EXPAND, Ui.ACCENT, 42, description = "沉浸模式") { ImmersiveActivity.open(ctx) }
+    // the immersive view, the main way to watch a shoot: filled in the accent, with its name
+    private val immersiveButton: View = LinearLayout(ctx).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER
+        background = pressable(ctx, Ui.ACCENT, dp(14).toFloat())
+        addView(IconView(ctx, Glyph.EXPAND, Ui.ON_ACCENT, 22), LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(7) })
+        addView(ctx.label("沉浸模式", Ui.SUBHEAD, Ui.ON_ACCENT, bold = true).single())
+        contentDescription = "沉浸模式"
+        setOnClickListener { Haptic.select(this); ImmersiveActivity.open(ctx) }
+        pressable(0.94f)
+    }
     private val refreshButton: IconView = ctx.iconButton(Glyph.REFRESH, Ui.ACCENT, 42, description = "刷新") {
         CameraHub.refresh()
         refreshButton.animate().rotationBy(360f).setDuration(700).setInterpolator(Ease.spring).start()
@@ -149,8 +161,8 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
             })
         }
         names.addView(count)
-        val top = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(cartridge, LayoutParams(dp(104), dp(124)))
+        val top = statusTop
+        top.addView(cartridge, LayoutParams(dp(120), dp(143)))
         top.addView(names, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         status.addView(top, matchWrap())
         status.addView(statusLine, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = dp(8); marginStart = dp(4) })
@@ -161,8 +173,12 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
         actions.background = rounded(Ui.SURFACE, dp(18).toFloat())
         actions.setPadding(dp(4), 0, dp(4), 0)
         listOf(connectButton, autoButton, immersiveButton, refreshButton, infoButton).forEach { b ->
-            b.background = pressable(ctx, android.graphics.Color.TRANSPARENT, dp(14).toFloat())
-            actions.addView(b, LayoutParams(0, dp(50), 1f))
+            if (b === immersiveButton) {
+                actions.addView(b, LayoutParams(0, dp(42), 2.2f).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) })
+            } else {
+                b.background = pressable(ctx, android.graphics.Color.TRANSPARENT, dp(14).toFloat())
+                actions.addView(b, LayoutParams(0, dp(50), 1f))
+            }
         }
         head.addView(actions, matchWrap().apply { topMargin = dp(10) })
         head.addView(errorBanner, matchWrap().apply { topMargin = dp(10) })
@@ -234,6 +250,9 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
             setPadding(dp(16), dp(6), dp(16), 0)
             headScroll.removeAllViews()
             head.setPadding(0, 0, 0, 0)
+            status.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            statusTop.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            cartridge.layoutParams = LinearLayout.LayoutParams(dp(120), dp(143))
             addView(head, matchWrap())
             addView(tools, matchWrap().apply { topMargin = dp(12) })
             addView(body, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -245,7 +264,12 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
             val column = (screen * 0.36f).toInt().coerceIn(280, 400)
             headScroll.removeAllViews()
             headScroll.addView(head, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            head.setPadding(0, 0, 0, dp(16))
+            // the column fills the height (as the right side does): the status card takes all the
+            // room the actions leave, its cartridge growing into it; the actions stand at the foot
+            head.setPadding(0, 0, 0, dp(14))
+            status.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            statusTop.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            cartridge.layoutParams = LinearLayout.LayoutParams(dp(160), ViewGroup.LayoutParams.MATCH_PARENT)
             addView(headScroll, LayoutParams(dp(column), ViewGroup.LayoutParams.MATCH_PARENT))
             val right = LinearLayout(ctx).apply { orientation = VERTICAL; setPadding(dp(14), 0, 0, 0) }
             right.addView(tools, matchWrap())
@@ -353,8 +377,6 @@ class CameraPage(private val activity: MainActivity) : LinearLayout(activity), A
         }
         storageBox.visibility = if (storageBox.childCount > 0) View.VISIBLE else View.GONE
         statusLine.visibility = if (connected && (exposure.childCount > 0 || storageBox.childCount > 0)) View.VISIBLE else View.GONE
-        // landscape with nothing connected: the column sits on the same middle as the empty state
-        head.gravity = if (arrangedWide == true && !connected) Gravity.CENTER_VERTICAL else Gravity.TOP
 
         connectButton.glyph = if (connected) Glyph.POWER else Glyph.CABLE
         connectButton.color = if (connected) Ui.SUB else Ui.ACCENT

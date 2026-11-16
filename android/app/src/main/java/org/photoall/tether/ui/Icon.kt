@@ -23,6 +23,7 @@ enum class Glyph {
     CIRCLE, TRASH, LOCK, UNLOCK, IMPORT, SHARE, INFO, CLOSE, CHEVRON_RIGHT, CHEVRON_DOWN, CHEVRON_LEFT,
     APERTURE, TIMER, EV, SUN, BULB, SPARKLES, WAND, GRAIN, HALO, PHOTO, PHOTO_STACK, FOLDER_PLUS, PLUS,
     MINUS, THERMO, WAVE, ROTATE, LIST, COPY, CUBE, ROLL, EYE, SLIDERS, CONTRAST, SELECT_ALL, ARROW_UP_RIGHT,
+    SEARCH, STAR, STAR_FILL, PENCIL,
 }
 
 class IconDrawable(var glyph: Glyph, var color: Int, private val weight: Float = 1.75f) : Drawable() {
@@ -174,6 +175,25 @@ class IconDrawable(var glyph: Glyph, var color: Int, private val weight: Float =
             Glyph.CHEVRON_DOWN -> poly(c, 5f, 9f, 12f, 16f, 19f, 9f)
             Glyph.CHEVRON_LEFT -> poly(c, 15f, 5f, 8f, 12f, 15f, 19f)
             Glyph.ARROW_UP_RIGHT -> { line(c, 6f, 18f, 18f, 6f); poly(c, 9f, 6f, 18f, 6f, 18f, 15f) }
+            Glyph.SEARCH -> { circle(c, 10.5f, 10.5f, 6.5f); line(c, 15.3f, 15.3f, 20.5f, 20.5f) }
+            Glyph.STAR, Glyph.STAR_FILL -> {
+                // five points round the middle, the inner corners between them
+                path.reset()
+                for (k in 0 until 10) {
+                    val a = -PI / 2 + k * PI / 5
+                    val rad = if (k % 2 == 0) 9.6f else 4.1f
+                    val x = 12f + rad * cos(a).toFloat()
+                    val y = 12.6f + rad * sin(a).toFloat()
+                    if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                path.close()
+                c.drawPath(path, if (glyph == Glyph.STAR_FILL) fill else stroke)
+                if (glyph == Glyph.STAR_FILL) c.drawPath(path, stroke)
+            }
+            Glyph.PENCIL -> {
+                poly(c, 4f, 20f, 4.6f, 16f, 15.8f, 4.8f, 19.2f, 8.2f, 8f, 19.4f, close = true)
+                line(c, 13.6f, 7f, 17f, 10.4f)
+            }
             Glyph.APERTURE -> {
                 circle(c, 12f, 12f, 9.5f)
                 for (k in 0 until 6) {

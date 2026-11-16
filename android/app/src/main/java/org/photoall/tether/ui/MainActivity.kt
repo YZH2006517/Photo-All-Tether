@@ -113,8 +113,8 @@ class MainActivity : AdaptiveActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
     }
 
-    // ---- the rail (landscape): a floating column — the app's mark at the top, the four tabs in
-    // the middle with a lit pill that slides to the chosen one, the camera's state at the foot.
+    // ---- the rail (landscape): a floating column — the four tabs in the middle with a lit pill
+    // that slides to the chosen one, the camera's state at the foot.
     private val railFrame by lazy { FrameLayout(this) }
     private val railPill by lazy { View(this) }
     private val railDot by lazy { PulseDot(this) }
@@ -146,13 +146,7 @@ class MainActivity : AdaptiveActivity() {
         nav.orientation = LinearLayout.VERTICAL
         nav.gravity = Gravity.CENTER_HORIZONTAL
         nav.background = null
-        nav.setPadding(0, dp(12), 0, dp(10))
-        // the mark: a roll of film on the accent
-        val mark = FrameLayout(this).apply {
-            background = rounded(Ui.ACCENT, dp(12).toFloat())
-            addView(IconView(this@MainActivity, Glyph.ROLL, Ui.ON_ACCENT, 22), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
-        }
-        nav.addView(mark, LinearLayout.LayoutParams(dp(38), dp(38)))
+        nav.setPadding(0, dp(10), 0, dp(10))
         nav.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         tabs.forEach { tab ->
             nav.addView(tab, LinearLayout.LayoutParams(dp(62), dp(58)).apply { topMargin = dp(2); bottomMargin = dp(2) })
@@ -270,6 +264,12 @@ class MainActivity : AdaptiveActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("tab", current)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // back from the LUT page (or anything else that changed the recipe)
+        (pages[2] as? RecipePage)?.reload()
     }
 
     override fun onStart() {

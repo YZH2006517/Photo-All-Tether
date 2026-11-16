@@ -4,6 +4,8 @@
 //   advance()         a frame exposed: the leader steps out and the spool clicks round
 //   rewind()          the roll is finished: the film winds back in, the cartridge spins, a new roll
 //   pause(on)         stop drawing while the page is out of sight
+//   intro()           the immersive view's opening: in from far off, spinning, the film drawn out
+//   snapshot(json)    a still of a stock's cartridge as a PNG data URL (stops the loop)
 // and tells it through window.CartBridge: ready(), tap(), open() (a double tap).
 (function () {
   'use strict';
@@ -130,7 +132,43 @@
       setTimeout(function () { leaderTarget = 18; }, 2200);
     },
     pause: function (on) { paused = !!on; if (!paused) requestAnimationFrame(frame); },
+    // the opening of the immersive view: the cartridge comes from far off spinning, the
+    // camera closes on it, and the film is drawn out of its lips
+    intro: function () {
+      zoomFrom = 3.4; zoomT0 = performance.now(); zoomMs = 1500;
+      leader = 0; leaderTarget = 0; cart.setLeader(0);
+      startSpin(2, 1700, null);
+      setTimeout(function () { leaderTarget = 34; }, 950);
+      setTimeout(function () { liftV = 2.0; }, 1500);
+    },
+    // a still of [json]'s cartridge, label to the front, as a PNG data URL (the film cards)
+    snapshot: function (json) {
+      try {
+        const o = typeof json === 'string' ? JSON.parse(json) : json;
+        look = {
+          name: o.name, maker: (o.maker || '').toUpperCase(), title: (o.title || '').toUpperCase(), iso: o.iso || '',
+          base: '#' + o.base, band: '#' + o.band, ink: '#' + o.ink,
+        };
+        cart.setLook(look);
+      } catch (e) { return ''; }
+      paused = true;
+      // the first call can come before the page has its size: take it now
+      if (vw() < 8 || vh() < 8) return '';
+      if (renderer.domElement.width < 8 || Math.abs(camera.aspect - vw() / vh()) > 0.01) {
+        camera.aspect = vw() / vh(); camera.updateProjectionMatrix();
+        dist = fit(); renderer.setSize(vw(), vh());
+      }
+      cart.setLeader(16);
+      holder.position.y = 0;
+      model.rotation.set(pitch, -0.62, 0);
+      shadow.visible = false;           // the card trims to the model; its floor is the card's
+      camera.position.set(0, 7, dist);
+      camera.lookAt(0, 1, 0);
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    },
   };
+  let zoomFrom = 1, zoomT0 = 0, zoomMs = 0;
 
   // ------------------------------------------------------------------ touch: turn it; tap, double tap
   const el = renderer.domElement;
@@ -181,7 +219,14 @@
     model.rotation.set(pitch, yaw + spin, 0);
     shadow.material.opacity = 1 - Math.min(0.5, (lift + float + 0.6) * 0.04);
     shadow.scale.setScalar(1 - Math.min(0.25, (lift + float) * 0.012));
-    camera.position.set(0, 7, dist);
+    // the intro's dolly: from far off to the usual distance, slowing as it arrives
+    let zoom = 1;
+    if (zoomMs > 0) {
+      const k = Math.min(1, (now - zoomT0) / zoomMs);
+      zoom = 1 + (zoomFrom - 1) * (1 - ease(k));
+      if (k >= 1) zoomMs = 0;
+    }
+    camera.position.set(0, 7 * zoom, dist * zoom);
     camera.lookAt(0, 1, 0);
     renderer.render(scene, camera);
     requestAnimationFrame(frame);

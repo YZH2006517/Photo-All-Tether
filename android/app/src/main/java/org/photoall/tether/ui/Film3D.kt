@@ -78,6 +78,8 @@ object FilmLook {
 @SuppressLint("SetJavaScriptEnabled", "ViewConstructor")
 class CartridgeView(context: Context, film: Int, scale: Float = 1f) : FrameLayout(context) {
     var onTap: (() -> Unit)? = null
+    /** The model is in and drawing (the intro waits for it). */
+    var onReady: (() -> Unit)? = null
     private var film = film
     private var ready = false
     private val pending = mutableListOf<String>()
@@ -97,6 +99,7 @@ class CartridgeView(context: Context, film: Int, scale: Float = 1f) : FrameLayou
                 pending.forEach { evaluateJavascript(it, null) }
                 pending.clear()
                 animate().alpha(1f).setDuration(500).setInterpolator(Ease.out).start()
+                onReady?.invoke()
             }
             @JavascriptInterface fun tap() = post { Haptic.select(this@CartridgeView); onTap?.invoke() }
             @JavascriptInterface fun open() = post { Haptic.confirm(this@CartridgeView); Cartridge3DActivity.open(context, this@CartridgeView.film) }
@@ -122,18 +125,30 @@ class CartridgeView(context: Context, film: Int, scale: Float = 1f) : FrameLayou
     }
 
     fun advance() = js("stage.advance()")
+    fun intro() = js("stage.intro()")
     fun rewind() = js("stage.rewind()")
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); web.onResume(); js("stage.pause(false)") }
     override fun onDetachedFromWindow() { js("stage.pause(true)"); web.onPause(); super.onDetachedFromWindow() }
 
-    // a sideways drag turns the cartridge; an upright one still scrolls the page
+    // a sideways drag turns the cartridge (and keeps it, however it drifts); one that goes
+    // clearly up or down first still scrolls the page
+    private var claim = 0
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; parent?.requestDisallowInterceptTouchEvent(true) }
-            MotionEvent.ACTION_MOVE -> if (abs(ev.y - downY) > abs(ev.x - downX) * 1.3f && abs(ev.y - downY) > dp(10))
-                parent?.requestDisallowInterceptTouchEvent(false)
+            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; claim = 0; parent?.requestDisallowInterceptTouchEvent(true) }
+            MotionEvent.ACTION_MOVE -> if (claim == 0) {
+                val dx = abs(ev.x - downX)
+                val dy = abs(ev.y - downY)
+                when {
+                    dx > slop && dx >= dy * 0.7f -> claim = 1
+                    dy > slop * 1.5f && dy > dx * 1.6f -> { claim = 2; parent?.requestDisallowInterceptTouchEvent(false) }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> claim = 0
         }
+        if (claim == 1) parent?.requestDisallowInterceptTouchEvent(true)
         return super.dispatchTouchEvent(ev)
     }
 
@@ -179,69 +194,6 @@ class Cartridge3DActivity : AdaptiveActivity() {
         const val EXTRA_FILM = "film"
         fun open(context: Context, film: Int) =
             context.startActivity(Intent(context, Cartridge3DActivity::class.java).putExtra(EXTRA_FILM, film))
-    }
-}
-
-/**
- * Loading a roll, the ritual (the phone app's camera back, assets/cartridge3d/back.html): the
- * back open, the cartridge dragged into its chamber, the leader pulled to the spool, wound on,
- * the back closed. When the film is in, the roll starts at frame 0.
- */
-class LoadFilmActivity : AdaptiveActivity() {
-    private var web: WebView? = null
-    override val alwaysFullscreen = true
-    override val offersRotation = false
-
-    @SuppressLint("SetJavaScriptEnabled")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val film = intent.getIntExtra(EXTRA_FILM, 4)
-        val url = FilmLook.query(Uri.parse("file:///android_asset/cartridge3d/back.html").buildUpon(), FilmLook.of(film)).build().toString()
-        val view = WebView(this).apply {
-            setBackgroundColor(Color.rgb(14, 13, 12))
-            settings.javaScriptEnabled = true
-            settings.allowFileAccess = true
-            overScrollMode = View.OVER_SCROLL_NEVER
-            addJavascriptInterface(object {
-                @JavascriptInterface fun done() = runOnUiThread {
-                    Roll.load(this@LoadFilmActivity, film)
-                    Haptic.rollDone(this@apply)
-                    finishFade()
-                }
-                @JavascriptInterface fun skip() = runOnUiThread {
-                    Roll.load(this@LoadFilmActivity, film)
-                    finishFade()
-                }
-            }, "AndroidBack")
-            loadUrl(url)
-        }
-        web = view
-        setContentView(view)
-        window.statusBarColor = Color.rgb(14, 13, 12)
-        window.navigationBarColor = Color.rgb(14, 13, 12)
-        window.decorView.post {
-            window.insetsController?.let {
-                it.hide(WindowInsets.Type.systemBars())
-                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        }
-    }
-
-    private fun finishFade() {
-        if (isFinishing) return
-        finish()
-        @Suppress("DEPRECATION")
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-    }
-
-    override fun onPause() { web?.onPause(); super.onPause() }
-    override fun onResume() { super.onResume(); web?.onResume() }
-    override fun onDestroy() { web?.destroy(); web = null; super.onDestroy() }
-
-    companion object {
-        const val EXTRA_FILM = "film"
-        fun open(context: Context, film: Int) =
-            context.startActivity(Intent(context, LoadFilmActivity::class.java).putExtra(EXTRA_FILM, film))
     }
 }
 

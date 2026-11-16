@@ -126,6 +126,9 @@ class SectionGrid<T>(
     private var sections: List<Pair<String, List<T>>> = emptyList()
     var columns = columns
         private set
+    /** Air under a day's title before its pictures (px); null: the usual 8 dp. */
+    var headerBottomPx: Int? = null
+        set(v) { if (field != v) { field = v; notifyDataSetChanged() } }
 
     /** Every item in display order (cells' [ThumbCell.index] point into it). */
     var flat: List<T> = emptyList()
@@ -168,6 +171,7 @@ class SectionGrid<T>(
                 addView(context.label("", Ui.HEADLINE, Ui.TEXT, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(context.label("", Ui.FOOTNOTE, Ui.ACCENT, bold = true).apply { setPadding(context.dp(8), 0, 0, 0) })
             }
+            v.setPadding(context.dp(4), context.dp(18), context.dp(4), headerBottomPx ?: context.dp(8))
             (v.getChildAt(0) as TextView).text = row.title
             val action = v.getChildAt(1) as TextView
             val actionText = headerActionText()
