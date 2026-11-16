@@ -1,6 +1,6 @@
 # Photo All 联机（Photo-All-Tether）
 
-相机用 USB 数据线连上手机。相机每拍一张，原片（RAW）就自动传到手机，再用手机 GPU 上的**光谱胶片模拟引擎**冲洗：先曝光到胶片、显影，再印放到相纸，最后可以叠加一层 LUT。
+相机拍摄后自动传至手机，在手机中模拟真实胶片冲洗效果。
 
 胶片引擎、胶片 / 相纸光谱数据和 LUT 都来自 [Photo-All-Android](https://github.com/YZH2006517/Photo-All-Android)，原样复用；它是 [spektrafilm](https://github.com/andreavolpato/spektrafilm) 在 [vkdt](https://github.com/hanatos/vkdt) 中 GPU 实现的移植。这个项目做的是另一半：USB 连接相机、管理存储卡里的照片，以及解码各品牌的 RAW。
 
