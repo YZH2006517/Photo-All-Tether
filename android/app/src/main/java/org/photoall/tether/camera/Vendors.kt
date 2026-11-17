@@ -192,19 +192,39 @@ object Vendors {
         return out
     }
 
-    /** Sony PC Remote: is a shot waiting in the camera's memory? (property 0xD215 above 0x8000) */
-    fun sonyShotWaiting(c: PtpConnection): Boolean {
+    /**
+     * Sony PC Remote: the current value of property 0xD215 (objects in memory), or null when the
+     * camera's property list does not hold it. A shot is waiting when it is above 0x8000.
+     */
+    fun sonyMemoryLevel(c: PtpConnection): SonyMemory {
         val blob = c.request(SONY_ALL_EXT_PROP_INFO)
         // Each property: u16 code, u16 type, u8 get/set, u8 enabled, default, current, form. Rather
         // than parse every type (and Sony's two enum-list layouts), find 0xD215 as a UINT16 (type 4).
         for (i in 8 until blob.size - 10) {
             if (blob[i] == 0x15.toByte() && blob[i + 1] == 0xD2.toByte() && blob[i + 2] == 0x04.toByte() && blob[i + 3] == 0x00.toByte()) {
                 val current = (blob[i + 8].toInt() and 0xFF) or ((blob[i + 9].toInt() and 0xFF) shl 8)
-                return current > 0x8000
+                return SonyMemory(current, blob.size)
             }
         }
-        return false
+        return SonyMemory(null, blob.size)
     }
+
+    /** 0xD215 as read ([level] null: not found) and the size of the property list it came in. */
+    class SonyMemory(val level: Int?, val listBytes: Int) {
+        val waiting: Boolean get() = (level ?: 0) > 0x8000
+    }
+
+    /** Sony's own event codes (named as in libgphoto2), for the log; null for other codes. */
+    fun sonyEventName(code: Int): String? = when (code) {
+        SONY_EVENT_OBJECT_ADDED -> "0xC201 索尼 ObjectAdded"
+        SONY_EVENT_OBJECT_REMOVED -> "0xC202 索尼 ObjectRemoved"
+        SONY_EVENT_PROPERTY_CHANGED -> "0xC203 索尼 PropertyChanged"
+        else -> null
+    }
+
+    const val SONY_EVENT_OBJECT_ADDED = 0xC201
+    const val SONY_EVENT_OBJECT_REMOVED = 0xC202
+    const val SONY_EVENT_PROPERTY_CHANGED = 0xC203
 
     /** Canon: keeps the camera from sleeping while tethered (call now and then). */
     fun keepAlive(c: PtpConnection, profile: Profile, info: DeviceInfo) {

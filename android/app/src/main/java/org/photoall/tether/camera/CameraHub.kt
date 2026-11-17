@@ -243,6 +243,7 @@ object CameraHub {
         files.clear()
         settings = Settings()
         listing = false
+        lastSonyLevel = -1
         synchronized(arrivals) { arrivals.clear() }
     }
 
@@ -428,7 +429,11 @@ object CameraHub {
                 try {
                     if (p.pollsEvents) Vendors.poll(c, p).forEach { (code, param) -> onEvent(code, param, "${p.brand.label}事件") }
                     // Sony PC Remote: a shot waits in the camera's memory until it is read
-                    if (p.sonyRemote && Vendors.sonyShotWaiting(c)) memoryShots(c)
+                    if (p.sonyRemote) {
+                        val m = Vendors.sonyMemoryLevel(c)
+                        noteSonyLevel(m)
+                        if (m.waiting) memoryShots(c, m)
+                    }
                     val now = System.currentTimeMillis()
                     if (now - lastSettings > 30000) {
                         lastSettings = now
@@ -464,28 +469,104 @@ object CameraHub {
     }
 
     private var memoryCount = 0
+    @Volatile private var lastSonyLevel: Int? = -1
 
-    // Sony PC Remote: read every shot waiting in the camera's memory (RAW+JPEG is two) into the
-    // phone at once (the next shot takes the same handle), list it under its own handle.
-    private fun memoryShots(c: PtpConnection) {
+    // The log gets 0xD215 when it changes (a shot arriving, taken), not every 400 ms poll.
+    private fun noteSonyLevel(m: Vendors.SonyMemory) {
+        if (m.level == lastSonyLevel) return
+        lastSonyLevel = m.level
+        note(if (m.level == null) "索尼内存：属性列表（0x9209，${m.listBytes} 字节）里没有 0xD215，无法知道有没有新照片"
+             else "索尼内存：0xD215 = 0x%04X（%s）".format(m.level, if (m.waiting) "有照片等待读取" else "无"))
+    }
+
+    /*
+     * Sony PC Remote: read every shot waiting in the camera's memory (RAW+JPEG is two) into the
+     * phone at once (the next shot takes the same handle 0xFFFFC001, and the camera drops the
+     * shot once it is read: libgphoto2 also reads it whole with GetObject right away), and list
+     * it under a handle of its own (see [isLocal]).
+     *
+     * The phone's copy is the only one this app can reach (the card is not readable in PC
+     * Remote), so it is kept in its own folder (memoryDir), named by the local shot's key: every
+     * later step (thumbnail, preview, develop, import) finds it through [cachedOriginal].
+     * 0.1.0 named the copy by the camera object's key and looked for it under the local one,
+     * whose capture date was filled in when the camera gave none: the copy was there but never
+     * found, and every step failed with "已不在相机内存里".
+     */
+    private fun memoryShots(c: PtpConnection, first: Vendors.SonyMemory) {
+        val h = Vendors.SONY_MEMORY_HANDLE
+        var m = first
         var guard = 0
-        do {
-            val info = ObjectInfo.parse(Vendors.SONY_MEMORY_HANDLE, c.request(Ptp.GET_OBJECT_INFO, Vendors.SONY_MEMORY_HANDLE))
-            val file = runCatching { fetchToCache(info) }.onFailure {
-                note("读取相机内存里的照片失败：${it.message}")
-                ErrorLog.record("索尼：读取内存中的照片", it, usbReport(usbDevice, c))
-            }.getOrNull() ?: return
-            val local = ObjectInfo(MEMORY_BASE + memoryCount++, 0, info.format, 0, info.size, info.thumbFormat,
-                info.imageWidth, info.imageHeight, 0, 0, info.filename, info.captureDate.ifEmpty {
+        while (m.waiting && guard++ < 4) {
+            val step = "GetObjectInfo(0x%08X)".format(h)
+            val info = try {
+                ObjectInfo.parse(h, c.request(Ptp.GET_OBJECT_INFO, h))
+            } catch (e: Exception) {
+                note("索尼内存：$step 失败：${ptpDetail(e)}")
+                ErrorLog.record("索尼：读取内存中照片的信息", e, usbReport(usbDevice, c))
+                return
+            }
+            note("索尼内存：%s → %s，格式 0x%04X，大小 %d 字节，拍摄时间「%s」，存储 0x%08X".format(
+                step, info.filename.ifEmpty { "（无文件名）" }, info.format, info.size, info.captureDate, info.storageId))
+            val part = File(memoryDir(), "incoming.part")
+            val began = System.currentTimeMillis()
+            val got = try {
+                part.outputStream().buffered(1 shl 20).use { out ->
+                    c.stream(Ptp.GET_OBJECT, intArrayOf(h), out, { _, _ -> })
+                }
+            } catch (e: Exception) {
+                note("索尼内存：GetObject(0x%08X) 失败，收到 %d / %d 字节：%s".format(h, part.length(), info.size, ptpDetail(e)))
+                ErrorLog.record("索尼：读取内存中的照片 ${info.filename}", e, usbReport(usbDevice, c))
+                part.delete()
+                return
+            }
+            val ms = (System.currentTimeMillis() - began).coerceAtLeast(1)
+            note("索尼内存：GetObject(0x%08X) → OK，收到 %d 字节（ObjectInfo 说 %d），%d ms，%.1f MB/s".format(
+                h, got, info.size, ms, got / 1048576.0 / (ms / 1000.0)))
+            if (got <= 0 || (info.size > 0 && got != info.size)) {
+                // keep what came (it may still open) but say so
+                note("索尼内存：${info.filename} 大小对不上，照样保存，冲洗可能失败")
+            }
+            val name = info.filename.ifEmpty { "SONY%04d.ARW".format(memoryCount) }
+            val local = ObjectInfo(MEMORY_BASE + memoryCount++, 0, info.format, 0, got, info.thumbFormat,
+                info.imageWidth, info.imageHeight, 0, 0, name, info.captureDate.ifEmpty {
                     java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss", Locale.US).format(Date())
                 })
-            // the thumbnail from the file itself (no card object to ask)
-            thumbFromFile(local, file)
-            files[local.handle] = local
-            publish(HashMap(files))
-            note("新拍（相机内存）：${info.filename}（${info.size / 1024} KB）")
-            newShot(local)
-        } while (++guard < 4 && Vendors.sonyShotWaiting(c))
+            // the camera may tell of the same shot twice: keep one
+            val twin = files.values.firstOrNull { isLocal(it.handle) && it.filename == local.filename && it.size == local.size }
+            if (twin != null) {
+                note("索尼内存：${local.filename} 已经收过（同名同大小），不重复加入")
+                part.delete()
+            } else {
+                val file = originalCacheFile(local)
+                if (!part.renameTo(file)) {
+                    part.copyTo(file, overwrite = true)
+                    part.delete()
+                }
+                pruneMemory()
+                note("索尼内存：已存到手机 ${file.parentFile?.name}/${file.name}（${file.length()} 字节）")
+                // the thumbnail from the file itself (no card object to ask)
+                thumbFromFile(local, file)
+                files[local.handle] = local
+                publish(HashMap(files))
+                note("新拍（相机内存）：${local.filename}（${local.size / 1024} KB）")
+                newShot(local)
+            }
+            m = Vendors.sonyMemoryLevel(c)
+            noteSonyLevel(m)
+        }
+    }
+
+    // A PTP failure for the log: operation and response codes, not just their names.
+    private fun ptpDetail(e: Throwable): String =
+        if (e is PtpException) "操作 0x%04X 返回 0x%04X（%s）".format(e.operation, e.code, e.message) else (e.message ?: e.toString())
+
+    /** Where shots read from camera memory are kept (the phone's only copy of them). */
+    private fun memoryDir(): File = File(app.cacheDir, "camera-memory").apply { mkdirs() }
+
+    // Keeps the newest shots read from camera memory (about 1 GB of 24 MB raws).
+    private fun pruneMemory() {
+        memoryDir().listFiles()?.filter { !it.name.endsWith(".part") }?.sortedByDescending { it.lastModified() }
+            ?.drop(MEMORY_KEEP)?.forEach { it.delete() }
     }
 
     private fun thumbFromFile(info: ObjectInfo, file: File) {
@@ -529,7 +610,10 @@ object CameraHub {
             }
             return
         }
-        note("$source：${Ptp.eventName(code)} 0x%08X".format(param))
+        val sonyName = if (profile?.brand == Brand.SONY) Vendors.sonyEventName(code) else null
+        // Sony tells of some setting changing every few seconds: 0xD215 is logged when it changes
+        if (code == Vendors.SONY_EVENT_PROPERTY_CHANGED && sonyName != null) return
+        note("$source：${sonyName ?: Ptp.eventName(code)} 0x%08X".format(param))
         when (code) {
             Ptp.EVENT_OBJECT_ADDED, Ptp.NIKON_EVENT_OBJECT_ADDED_IN_SDRAM -> {
                 eventsSeen = true
@@ -706,10 +790,28 @@ object CameraHub {
      */
     fun orientationOf(info: ObjectInfo): Int {
         orientations[info.key]?.let { return it }
+        if (isLocal(info.handle)) {
+            // a shot from Sony camera memory: the head of the phone's copy
+            val head = cachedOriginal(info)?.let { f -> runCatching { f.inputStream().use { it.readNBytesCompat(32 * 1024) } }.getOrNull() }
+                ?: return 1
+            return ExifOrientation.read(head).also { orientations[info.key] = it }
+        }
         val c = connection ?: return 1
         if (device?.supports(Ptp.GET_PARTIAL_OBJECT) != true || isLocal(info.handle)) return 1
         val head = runCatching { c.request(Ptp.GET_PARTIAL_OBJECT, info.handle, 0, 32 * 1024) }.getOrNull() ?: return 1
         return ExifOrientation.read(head).also { orientations[info.key] = it }
+    }
+
+    // InputStream.readNBytes needs API 33: up to [n] bytes from the start.
+    private fun java.io.InputStream.readNBytesCompat(n: Int): ByteArray {
+        val buf = ByteArray(n)
+        var at = 0
+        while (at < n) {
+            val r = read(buf, at, n - at)
+            if (r <= 0) break
+            at += r
+        }
+        return if (at == n) buf else buf.copyOf(at)
     }
 
     private fun upright(bmp: Bitmap, orientation: Int): Bitmap {
@@ -745,6 +847,7 @@ object CameraHub {
             note("大图预览：${e.message}")
             ErrorLog.record("读取大图预览 ${item.name}", e, usbReport(usbDevice, connection))
         }
+        if (isLocal(item.primary.handle)) return null // no camera object to ask
         return runCatching { c.request(Ptp.GET_THUMB, item.primary.handle) }.getOrNull()
             ?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
     }
@@ -754,7 +857,7 @@ object CameraHub {
         originalCacheFile(info).takeIf { it.exists() && it.length() == info.size }
 
     private fun originalCacheFile(info: ObjectInfo): File {
-        val dir = File(app.cacheDir, "camera").apply { mkdirs() }
+        val dir = if (isLocal(info.handle)) memoryDir() else File(app.cacheDir, "camera").apply { mkdirs() }
         return File(dir, "%08x_%s".format(info.key.hashCode(), info.filename.replace(Regex("[^A-Za-z0-9._-]"), "_")))
     }
 
@@ -791,13 +894,26 @@ object CameraHub {
 
     /** Copies a file from the camera into [out] (blocking); [progress] gets bytes so far and the total. */
     fun download(info: ObjectInfo, out: OutputStream, progress: (Long, Long) -> Unit) {
+        // A shot read from Sony camera memory: only the phone's copy exists (camera not needed).
+        if (isLocal(info.handle)) {
+            val copy = cachedOriginal(info)
+            if (copy == null) {
+                val f = originalCacheFile(info)
+                note("手机副本缺失：%s 应在 %s/%s（存在=%s，%d / %d 字节）；该目录现有 %d 个文件".format(
+                    info.filename, f.parentFile?.name, f.name, f.exists(), f.length(), info.size,
+                    f.parentFile?.listFiles()?.size ?: 0))
+                throw IllegalStateException("${info.filename} 在手机上的副本已不在（被清理了？相机内存里的照片只能读一次）")
+            }
+            copy.inputStream().use { it.copyTo(out, 1 shl 20) }
+            progress(info.size, info.size)
+            return
+        }
         val c = connection ?: throw IllegalStateException("相机未连接")
         cachedOriginal(info)?.let { cached ->
             cached.inputStream().use { it.copyTo(out, 1 shl 20) }
             progress(info.size, info.size)
             return
         }
-        if (isLocal(info.handle)) throw IllegalStateException("${info.filename} 已不在相机内存里")
         // pictures held in camera memory (Nikon SDRAM, Sony PC Remote) are read whole
         val memory = (info.handle.toLong() and 0xFFFF0000L) == 0xFFFF0000L
         val partial = device?.supports(Ptp.GET_PARTIAL_OBJECT) == true && !memory && info.size > 0
@@ -882,4 +998,5 @@ object CameraHub {
     private const val ACTION_PERMISSION = "org.photoall.tether.USB_PERMISSION"
     private const val CHUNK = 4 * 1024 * 1024
     private const val MEMORY_BASE = 0x7F000000
+    private const val MEMORY_KEEP = 40
 }

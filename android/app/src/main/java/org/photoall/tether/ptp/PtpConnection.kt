@@ -362,7 +362,7 @@ class PtpConnection private constructor(
             val ms = SystemClock.elapsedRealtime() - began
             if (n <= 0) {
                 if (closed) throw IOException("连接已关闭")
-                if (ms < 30 && chunk > MIN_CHUNK && len > MIN_CHUNK) { smaller(); continue }
+                if (ms < 30 && chunk > MIN_CHUNK && len > MIN_CHUNK) { smaller("写", n, ms, len, writeErrors); continue }
                 // a command (12-32 bytes) is one packet: a wire error before it went is sent again
                 if (len <= packet && ms < timeout - 50 && ++writeErrors <= 3) {
                     transferErrors++
@@ -424,7 +424,7 @@ class PtpConnection private constructor(
                 SystemClock.sleep(20L * wireErrors)
                 continue
             }
-            if (n < 0 && ms < 30 && chunk > MIN_CHUNK) { smaller(); wireErrors = 0; continue }
+            if (n < 0 && ms < 30 && chunk > MIN_CHUNK) { smaller("读", n, ms, len, wireErrors); wireErrors = 0; continue }
             throw UsbException("$stage：USB 读取失败（返回 $n，${ms} ms，${if (ms >= timeout - 50) "超时：相机没有回应" else "立即失败"}，每次 ${len / 1024} KB）", stage, n, ms)
         }
     }
@@ -433,10 +433,13 @@ class PtpConnection private constructor(
     @Volatile var transferErrors = 0
         private set
 
-    private fun smaller() {
+    // A transfer of [len] bytes failed at once (in [ms] ms, after [retries] tries): from now on
+    // 16 KB. Logged with where it happened, so a refused size can be told from a stalled pipe
+    // (a stall fails at every size, and the 16 KB tries that follow fail too).
+    private fun smaller(direction: String, n: Int, ms: Long, len: Int, retries: Int) {
         chunk = MIN_CHUNK
-        log("USB 大块传输被系统拒绝，改为每次 ${MIN_CHUNK / 1024} KB")
-        note("改为 ${MIN_CHUNK / 1024} KB 传输")
+        log("USB 大块传输被系统拒绝（$stage，$direction ${len / 1024} KB 返回 $n，${ms} ms，已重试 $retries 次），改为每次 ${MIN_CHUNK / 1024} KB")
+        note("改为 ${MIN_CHUNK / 1024} KB 传输（$stage，返回 $n）")
     }
 
     private fun roundUp(n: Int): Int = ((n + packet - 1) / packet) * packet
