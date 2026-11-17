@@ -166,7 +166,7 @@ object DevelopQueue {
                 changed()
                 return
             }
-            developer.execute { develop(app, job, file, item.key, Library.originalOf(item.key)) }
+            developer.execute { develop(app, job, file, item.key, Library.originalOf(item.key)) { pairedJpeg(app, item) } }
         } catch (e: Throwable) {
             fail(job, e)
         }
@@ -192,7 +192,25 @@ object DevelopQueue {
 
     // ---- develop -------------------------------------------------------------------------------
 
-    private fun develop(app: Context, job: Job, file: File, cameraKey: String?, original: Library.Entry?) {
+    // RAW+JPEG from the camera: the JPEG of the pair (looked up again, it may have come after the
+    // raw), copied to the work folder; null when the shot has none.
+    private fun pairedJpeg(app: Context, item: CameraItem): File? {
+        val jpeg = item.jpeg ?: CameraHub.items.firstOrNull { it.key == item.key }?.jpeg ?: return null
+        val file = File(File(app.cacheDir, "work").apply { mkdirs() }, safe(jpeg.filename))
+        val cached = CameraHub.cachedOriginal(jpeg)
+        if (cached != null) cached.copyTo(file, overwrite = true)
+        else file.outputStream().buffered(1 shl 20).use { out -> CameraHub.download(jpeg, out) { _, _ -> } }
+        return file
+    }
+
+    /**
+     * Develops [file]. A raw this app cannot decode (Nikon High Efficiency, a body LibRaw does not
+     * know yet) is developed from [jpegFallback] instead when that gives a file (the JPEG of a
+     * RAW+JPEG shot), so the shot is not lost; the reason is kept in the job and the log.
+     */
+    private fun develop(app: Context, job: Job, file: File, cameraKey: String?, original: Library.Entry?,
+                        jpegFallback: (() -> File?)? = null) {
+        var fallbackFile: File? = null
         try {
             job.status = Status.DEVELOPING
             job.progress = 0f
@@ -204,27 +222,49 @@ object DevelopQueue {
             val seed = Random.nextInt(1, Int.MAX_VALUE)
             val ext = file.extension.uppercase(Locale.ROOT)
             val started = System.currentTimeMillis()
-            val developed: org.photoall.tether.engine.Developed
+            var done: org.photoall.tether.engine.Developed? = null
             var meta: Map<String, String> = emptyMap()
+            var source = file
+            var rawProblem: String? = null
             if (ext in ObjectInfo.RAW_EXTENSIONS) {
                 job.detail = "解码 RAW"
                 changed()
                 val key = RawFile.embeddedJpeg(file.path)?.let { Brightness.key(it) } ?: 0f
-                RawFile.open(file.path, longEdge).use { raw ->
-                    meta = raw.meta
-                    job.detail = "冲洗"
+                val raw = try {
+                    RawFile.open(file.path, longEdge)
+                } catch (e: Exception) {
+                    // RAW+JPEG: develop the JPEG of the pair rather than fail the shot
+                    val get = jpegFallback ?: throw e
+                    job.detail = "RAW 解不了，取同一张的 JPEG"
                     changed()
-                    developed = engine.developRaw(raw, recipe, longEdge, key, seed, app)
+                    val jpeg = runCatching { get() }
+                        .onFailure { CameraHub.note("${job.title}：取同一张的 JPEG 失败：${it.message}") }
+                        .getOrNull() ?: throw e
+                    rawProblem = e.message ?: e.toString()
+                    CameraHub.note("${job.title}：$rawProblem；改用 ${jpeg.name} 冲洗")
+                    fallbackFile = jpeg
+                    source = jpeg
+                    null
                 }
-                Preview.offer(app, file)
-            } else {
+                if (raw != null) {
+                    raw.use {
+                        meta = it.meta
+                        job.detail = "冲洗"
+                        changed()
+                        done = engine.developRaw(it, recipe, longEdge, key, seed, app)
+                    }
+                    Preview.offer(app, file)
+                }
+            }
+            if (done == null) {
                 job.detail = "冲洗 JPEG"
                 changed()
-                val bitmap = decodeJpeg(file, longEdge) ?: throw IllegalStateException("无法读取 ${file.name}")
-                meta = jpegMeta(file)
-                developed = engine.developBitmap(bitmap, recipe, longEdge, seed, app)
+                val bitmap = decodeJpeg(source, longEdge) ?: throw IllegalStateException("无法读取 ${source.name}")
+                meta = jpegMeta(source)
+                done = engine.developBitmap(bitmap, recipe, longEdge, seed, app)
                 bitmap.recycle()
             }
+            val developed = done!!
             job.detail = "存储"
             changed()
             val name = "${job.title}_${safe(Films.short(recipe.film)).replace(" ", "")}.jpg".takeIf { recipe.filmOn }
@@ -235,7 +275,8 @@ object DevelopQueue {
                 Library.nextId(), Library.PRINT, uri.toString(), name, "image/jpeg", cameraKey, original?.uri,
                 System.currentTimeMillis(), meta["time"]?.toLongOrNull()?.times(1000) ?: 0L,
                 developed.bitmap.width, developed.bitmap.height, recipe.toJson(), meta,
-                developed.note + "冲洗结果\t总用时\t%.1f 秒\n".format((System.currentTimeMillis() - started) / 1000.0),
+                developed.note + (rawProblem?.let { "冲洗结果\t来源\tJPEG（RAW 解不了：$it）\n" } ?: "") +
+                    "冲洗结果\t总用时\t%.1f 秒\n".format((System.currentTimeMillis() - started) / 1000.0),
             )
             Library.add(app, entry)
             job.thumb = Bitmap.createScaledBitmap(developed.bitmap, 240, 240 * developed.bitmap.height / developed.bitmap.width, true)
@@ -243,7 +284,8 @@ object DevelopQueue {
             job.result = entry
             job.status = Status.DONE
             job.progress = 1f
-            job.detail = "%.1f 秒 · %s".format((System.currentTimeMillis() - started) / 1000.0, summary)
+            job.detail = "%.1f 秒 · %s".format((System.currentTimeMillis() - started) / 1000.0, summary) +
+                (if (rawProblem != null) " · 用 JPEG 冲洗（RAW 不支持）" else "")
             developedThisSession++
             CameraHub.note("冲洗 ${job.title}：${job.detail}")
             changed()
@@ -252,6 +294,7 @@ object DevelopQueue {
             fail(job, e)
         } finally {
             if (file.exists() && file.parentFile?.name == "work") file.delete()
+            fallbackFile?.takeIf { it.exists() && it.parentFile?.name == "work" }?.delete()
         }
     }
 

@@ -1,5 +1,11 @@
 # 更新记录
 
+## 0.1.2
+
+### 尼康高效率 RAW（HE / HE★）
+- 冲洗 Z f、Z8、Z9、Z6III 等机身的 HE / HE★ RAW 时，不再显示看不懂的「Unsupported file format or not RAW file」，而是提示「尼康高效率 RAW 暂不支持：请在相机菜单「RAW 压缩」里改成「无损压缩」」
+- 拍 RAW+JPEG 时，RAW 解不了就自动改用同一张的 JPEG 冲洗，照片不会白拍；冲洗任务上标明「用 JPEG 冲洗（RAW 不支持）」，照片信息里记下原因
+
 ## 0.1.1
 
 ### 修复

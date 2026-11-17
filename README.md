@@ -4,11 +4,11 @@
 
 胶片引擎、胶片 / 相纸光谱数据和 LUT 都来自 [Photo-All-Android](https://github.com/YZH2006517/Photo-All-Android)，原样复用；它是 [spektrafilm](https://github.com/andreavolpato/spektrafilm) 在 [vkdt](https://github.com/hanatos/vkdt) 中 GPU 实现的移植。这个项目做的是另一半：USB 连接相机、管理存储卡里的照片，以及解码各品牌的 RAW。
 
-> 当前版本 **0.1.1**：修复索尼 PC 遥控模式下新拍的照片无法预览、冲洗、导入，并补充索尼诊断日志，见 [更新记录](CHANGELOG.md)。真机只测过**尼康 Z 6II**，其他品牌已按 libgphoto2 的做法适配，还没在真机上验证，见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
+> 当前版本 **0.1.2**：尼康高效率 RAW（HE / HE★）给出明确提示，拍 RAW+JPEG 时自动改用 JPEG 冲洗；0.1.1 修复了索尼 PC 遥控模式下新拍的照片无法预览、冲洗、导入，见 [更新记录](CHANGELOG.md)。真机只测过**尼康 Z 6II**，其他品牌已按 libgphoto2 的做法适配，还没在真机上验证，见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
 
 ## 下载
 
-**[下载 PhotoAll-Tether-0.1.1.apk](https://github.com/YZH2006517/Photo-All-Tether/releases/download/v0.1.1/PhotoAll-Tether-0.1.1.apk)** · [所有版本](https://github.com/YZH2006517/Photo-All-Tether/releases) · [更新记录](CHANGELOG.md)
+**[下载 PhotoAll-Tether-0.1.2.apk](https://github.com/YZH2006517/Photo-All-Tether/releases/download/v0.1.2/PhotoAll-Tether-0.1.2.apk)** · [所有版本](https://github.com/YZH2006517/Photo-All-Tether/releases) · [更新记录](CHANGELOG.md)
 
 - 在手机上打开 APK 安装，需要允许安装未知来源应用
 - Android 10（API 29）及以上，64 位 ARM（arm64-v8a），GPU 支持 Vulkan 1.1，手机支持 USB OTG

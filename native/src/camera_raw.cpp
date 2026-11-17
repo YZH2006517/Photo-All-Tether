@@ -209,17 +209,32 @@ bool generic_decode(LibRaw &lr, DecodedRaw &out, std::string &error, const Decod
   return true;
 }
 
+// Nikon's High Efficiency raws (NEF compression 13 = HE, 14 = HE*, the TicoRAW codec of the Z 8,
+// Z 9, Z f, Z 6III ...) open (the makernotes are read) but LibRaw cannot decode the pixels: say
+// so in words the user can act on. Empty for every other file.
+std::string unsupported_reason(LibRaw &lr)
+{
+  if(lr.imgdata.idata.maker_index != LIBRAW_CAMERAMAKER_Nikon) return {};
+  const int c = lr.imgdata.makernotes.nikon.NEFCompression;
+  if(c != 13 && c != 14) return {};
+  return std::string("尼康高效率 RAW（") + (c == 14 ? "HE★" : "HE") +
+         "）暂不支持：请在相机菜单「RAW 压缩」里改成「无损压缩」";
+}
+
 bool fill_from(LibRaw &lr, int opened, DecodedRaw &out, std::string &error, const DecodeOptions &opts)
 {
   if(opened != LIBRAW_SUCCESS)
   {
-    error = std::string("无法打开 RAW：") + libraw_strerror(opened);
+    error = unsupported_reason(lr);
+    if(error.empty()) error = std::string("无法打开 RAW：") + libraw_strerror(opened);
     return false;
   }
   const int unpacked = lr.unpack();
   if(unpacked != LIBRAW_SUCCESS)
   {
-    error = std::string("RAW 解码失败：") + libraw_strerror(unpacked);
+    // a later LibRaw may decode HE: only explained when this one could not
+    error = unsupported_reason(lr);
+    if(error.empty()) error = std::string("RAW 解码失败：") + libraw_strerror(unpacked);
     return false;
   }
   const libraw_image_sizes_t &S = lr.imgdata.sizes;

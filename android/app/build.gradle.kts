@@ -16,8 +16,8 @@ android {
         applicationId = "org.photoall.tether"
         minSdk = 29
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.1"
+        versionCode = 5
+        versionName = "0.1.2"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake { arguments += "-DPHOTOALL_PHONE=$phone" }
