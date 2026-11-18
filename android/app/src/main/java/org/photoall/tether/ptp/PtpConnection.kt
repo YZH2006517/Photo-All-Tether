@@ -479,7 +479,12 @@ class PtpConnection private constructor(
         }
 
         fun open(manager: UsbManager, device: UsbDevice, log: (String) -> Unit): PtpConnection {
-            val usbInterface = findInterface(device) ?: throw IOException("这个 USB 设备不是 PTP 相机")
+            val usbInterface = findInterface(device) ?: throw IOException(
+                // class 8: USB mass storage (Panasonic PC(Storage), cameras set to "Mass Storage")
+                if ((0 until device.interfaceCount).any { device.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_MASS_STORAGE })
+                    "相机现在是 U 盘模式（USB 大容量存储），App 连不上：把相机的 USB 模式改成 PTP / MTP" +
+                        "（松下选「PC(Tether)」，索尼选「PC 遥控」），再重新插线"
+                else "这个 USB 设备不是 PTP 相机：把相机的 USB 模式改成 PTP / MTP 后重新插线")
             var bulkIn: UsbEndpoint? = null
             var bulkOut: UsbEndpoint? = null
             var interrupt: UsbEndpoint? = null

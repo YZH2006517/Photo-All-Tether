@@ -132,6 +132,9 @@ object Vendors {
                     di = DeviceInfo.parse(c.request(Ptp.GET_DEVICE_INFO))
                     note("松下：声明为 Windows MTP 后支持 ${di.operations.size} 种操作")
                 }.onFailure { note("松下 MTP 声明：${it.message}") }
+            } else {
+                // as libgphoto2: only when the camera lists the property
+                note("松下：相机没有列出属性 0xD406（MTP 会话发起方），不做 Windows MTP 声明")
             }
             else -> {}
         }
@@ -213,6 +216,30 @@ object Vendors {
     class SonyMemory(val level: Int?, val listBytes: Int) {
         val waiting: Boolean get() = (level ?: 0) > 0x8000
     }
+
+    /**
+     * An event code for the log, named by the camera's maker: the 0xC1xx range means different
+     * things to each (0xC101 is Nikon's ObjectAddedInSdram but a status event on a Panasonic).
+     */
+    fun eventName(brand: Brand?, code: Int): String {
+        if ((code and 0xF000) != 0xC000) return Ptp.eventName(code)
+        return when (brand) {
+            Brand.NIKON -> Ptp.eventName(code)
+            Brand.SONY -> sonyEventName(code) ?: "0x%04X（索尼）".format(code)
+            Brand.PANASONIC -> when (code) {
+                PANASONIC_EVENT_OBJECT_ADDED -> "0xC108 松下 ObjectAdded"
+                PANASONIC_EVENT_OBJECT_ADDED_SDRAM -> "0xC109 松下 ObjectAddedSDRAM"
+                else -> "0x%04X（松下）".format(code)
+            }
+            else -> "0x%04X（${brand?.label ?: "厂商"}）".format(code)
+        }
+    }
+
+    // Panasonic (libgphoto2 ptp.h): a new file on the card / in camera memory, the handle in
+    // param 1. 0xC107 comes every few seconds (param 0x12000020 / 0x12000010, a status poll).
+    const val PANASONIC_EVENT_OBJECT_ADDED = 0xC108
+    const val PANASONIC_EVENT_OBJECT_ADDED_SDRAM = 0xC109
+    const val PANASONIC_EVENT_STATUS = 0xC107
 
     /** Sony's own event codes (named as in libgphoto2), for the log; null for other codes. */
     fun sonyEventName(code: Int): String? = when (code) {

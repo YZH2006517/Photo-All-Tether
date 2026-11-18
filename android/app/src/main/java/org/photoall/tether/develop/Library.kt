@@ -210,14 +210,31 @@ object Library {
                 context.contentResolver.delete(uri, null, null)
                 gone += e
             } catch (s: SecurityException) {
-                if (Build.VERSION.SDK_INT >= 30 || s is RecoverableSecurityException) needConsent += uri else gone += e
+                // a picture already deleted in the gallery has no row left: Android then refuses the
+                // delete, and asking the user to allow it fails too ("Invalid Uri") — it is gone already
+                if (!exists(context, uri)) gone += e
+                else if (Build.VERSION.SDK_INT >= 30 || s is RecoverableSecurityException) needConsent += uri else gone += e
+            } catch (x: IllegalArgumentException) {
+                gone += e
             }
         }
         forget(context, gone)
-        if (needConsent.isEmpty()) return null
-        return if (Build.VERSION.SDK_INT >= 30) MediaStore.createDeleteRequest(context.contentResolver, needConsent).intentSender
-        else null
+        if (needConsent.isEmpty() || Build.VERSION.SDK_INT < 30) return null
+        return try {
+            MediaStore.createDeleteRequest(context.contentResolver, needConsent).intentSender
+        } catch (x: IllegalArgumentException) {
+            // one of them went missing in between: forget the missing, ask for the rest
+            val still = needConsent.filter { exists(context, it) }
+            forget(context, list.filter { Uri.parse(it.uri) in needConsent && Uri.parse(it.uri) !in still })
+            if (still.isEmpty()) null
+            else runCatching { MediaStore.createDeleteRequest(context.contentResolver, still).intentSender }.getOrNull()
+        }
     }
+
+    /** Whether the gallery still has [uri] (the user may have deleted it there). */
+    private fun exists(context: Context, uri: Uri): Boolean = runCatching {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { it.moveToFirst() } ?: false
+    }.getOrDefault(false)
 
     fun forget(context: Context, list: List<Entry>) {
         if (list.isEmpty()) return
