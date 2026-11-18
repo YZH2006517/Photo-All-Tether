@@ -268,6 +268,9 @@ object CameraHub {
             device = info
             note("相机：${info.manufacturer} ${info.model}，固件 ${info.version}，厂商扩展 ${info.vendorExtension.ifEmpty { "-" }}")
             note("支持：${info.operations.size} 种操作，${info.events.size} 种事件；Nikon GetEvent ${yes(info.supports(Ptp.NIKON_GET_EVENT))}，大缩略图 ${yes(info.supports(Ptp.NIKON_GET_LARGE_THUMB))}，分段读取 ${yes(info.supports(Ptp.GET_PARTIAL_OBJECT))}")
+            // what exactly, for a camera not tried here yet
+            note("厂商扩展 ID 0x%X；操作 %s；事件 %s；属性 %s".format(info.vendorExtensionId,
+                hexList(info.operations), hexList(info.events), hexList(info.properties)))
             val opened = c.transact(Ptp.OPEN_SESSION, intArrayOf(1))
             if (opened.code != Ptp.OK && opened.code != Ptp.SESSION_ALREADY_OPEN) throw PtpException(Ptp.OPEN_SESSION, opened.code)
             if (gen != generation) return
@@ -330,6 +333,8 @@ object CameraHub {
     }
 
     private fun yes(b: Boolean) = if (b) "有" else "无"
+
+    private fun hexList(codes: Set<Int>): String = codes.sorted().joinToString(" ") { "%04X".format(it) }.ifEmpty { "-" }
 
     /** The USB device and the last USB steps, for the error log. */
     private fun usbReport(target: UsbDevice?, c: PtpConnection?): String = buildString {
@@ -531,30 +536,42 @@ object CameraHub {
                 info.imageWidth, info.imageHeight, 0, 0, name, info.captureDate.ifEmpty {
                     java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss", Locale.US).format(Date())
                 })
-            // the camera may tell of the same shot twice: keep one
-            val twin = files.values.firstOrNull { isLocal(it.handle) && it.filename == local.filename && it.size == local.size }
-            if (twin != null) {
-                note("索尼内存：${local.filename} 已经收过（同名同大小），不重复加入")
-                part.delete()
-            } else {
-                val file = originalCacheFile(local)
-                if (!part.renameTo(file)) {
-                    part.copyTo(file, overwrite = true)
-                    part.delete()
-                }
-                pruneMemory()
-                note("索尼内存：已存到手机 ${file.parentFile?.name}/${file.name}（${file.length()} 字节）")
-                // the thumbnail from the file itself (no card object to ask)
-                thumbFromFile(local, file)
-                files[local.handle] = local
-                publish(HashMap(files))
-                note("新拍（相机内存）：${local.filename}（${local.size / 1024} KB）")
-                newShot(local)
-            }
+            keepLocalShot(part, local, "索尼内存", "相机内存")
             m = Vendors.sonyMemoryLevel(c)
             noteSonyLevel(m)
         }
     }
+
+    /*
+     * A shot read whole into [part] with no camera object to come back to (Sony camera memory, a
+     * Panasonic file whose ObjectInfo the camera refuses): kept on the phone as [local] (see
+     * [isLocal], [memoryDir]) and listed like any other shot. [tag] starts its log lines, [where]
+     * says where it came from in the "新拍" line.
+     */
+    private fun keepLocalShot(part: File, local: ObjectInfo, tag: String, where: String) {
+        // the camera may tell of the same shot twice: keep one
+        val twin = files.values.firstOrNull { isLocal(it.handle) && it.filename == local.filename && it.size == local.size }
+        if (twin != null) {
+            note("$tag：${local.filename} 已经收过（同名同大小），不重复加入")
+            part.delete()
+            return
+        }
+        val file = originalCacheFile(local)
+        if (!part.renameTo(file)) {
+            part.copyTo(file, overwrite = true)
+            part.delete()
+        }
+        pruneMemory()
+        note("$tag：已存到手机 ${file.parentFile?.name}/${file.name}（${file.length()} 字节）")
+        // the thumbnail from the file itself (no card object to ask)
+        thumbFromFile(local, file)
+        files[local.handle] = local
+        publish(HashMap(files))
+        note("新拍（$where）：${local.filename}（${local.size / 1024} KB）")
+        newShot(local)
+    }
+
+    private fun nowStamp(): String = java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss", Locale.US).format(Date())
 
     // A PTP failure for the log: operation and response codes, not just their names.
     private fun ptpDetail(e: Throwable): String =
@@ -610,16 +627,29 @@ object CameraHub {
             }
             return
         }
-        val sonyName = if (profile?.brand == Brand.SONY) Vendors.sonyEventName(code) else null
-        // Sony tells of some setting changing every few seconds: 0xD215 is logged when it changes
-        if (code == Vendors.SONY_EVENT_PROPERTY_CHANGED && sonyName != null) return
-        note("$source：${sonyName ?: Ptp.eventName(code)} 0x%08X".format(param))
-        when (code) {
-            Ptp.EVENT_OBJECT_ADDED, Ptp.NIKON_EVENT_OBJECT_ADDED_IN_SDRAM -> {
+        val brand = profile?.brand
+        // Sony tells of some setting changing every few seconds (0xD215 is logged when it
+        // changes), Panasonic of its status every two: not worth a log line each
+        if (brand == Brand.SONY && code == Vendors.SONY_EVENT_PROPERTY_CHANGED) return
+        if (brand == Brand.PANASONIC && code == Vendors.PANASONIC_EVENT_STATUS) return
+        note("$source：${Vendors.eventName(brand, code)} 0x%08X".format(param))
+        // 0xC1xx are the maker's own: Nikon's only when it is a Nikon
+        val nikonAdded = code == Ptp.NIKON_EVENT_OBJECT_ADDED_IN_SDRAM && (brand == Brand.NIKON || brand == null)
+        val panasonicAdded = brand == Brand.PANASONIC &&
+            (code == Vendors.PANASONIC_EVENT_OBJECT_ADDED || code == Vendors.PANASONIC_EVENT_OBJECT_ADDED_SDRAM)
+        when {
+            code == Ptp.EVENT_OBJECT_ADDED || nikonAdded -> {
                 eventsSeen = true
-                val handle = if (code == Ptp.NIKON_EVENT_OBJECT_ADDED_IN_SDRAM && param == 0) Ptp.NIKON_SDRAM_HANDLE else param
+                val handle = if (nikonAdded && param == 0) Ptp.NIKON_SDRAM_HANDLE else param
                 io.execute { added(handle) }
             }
+            panasonicAdded -> {
+                eventsSeen = true
+                // libgphoto2 waits a moment: the file may not be readable at once
+                io.execute { Thread.sleep(100); added(param) }
+            }
+        }
+        when (code) {
             Ptp.EVENT_OBJECT_REMOVED -> {
                 if (files.remove(param) != null) publish(HashMap(files))
             }
@@ -637,16 +667,84 @@ object CameraHub {
     private fun added(handle: Int) {
         val c = connection ?: return
         if (files.containsKey(handle)) return
-        val info = runCatching { ObjectInfo.parse(handle, c.request(Ptp.GET_OBJECT_INFO, handle)) }
-            .onFailure {
-                note("新文件 0x%08X 读取失败：%s".format(handle, it.message))
-                ErrorLog.record("读取新拍的照片信息", it, usbReport(usbDevice, c))
-            }.getOrNull() ?: return
+        val panasonic = profile?.brand == Brand.PANASONIC
+        val info = try {
+            ObjectInfo.parse(handle, c.request(Ptp.GET_OBJECT_INFO, handle))
+        } catch (e: Exception) {
+            note("新文件 0x%08X：GetObjectInfo 失败：%s".format(handle, ptpDetail(e)))
+            // Panasonic in PC(Tether) may refuse ObjectInfo (and the card): read the file itself
+            if (panasonic && e is PtpException && c.broken == null) fetchWithoutInfo(c, handle)
+            else ErrorLog.record("读取新拍的照片信息", e, usbReport(usbDevice, c))
+            return
+        }
+        if (panasonic) note("松下：GetObjectInfo(0x%08X) → %s，格式 0x%04X，%d 字节，存储 0x%08X".format(
+            handle, info.filename, info.format, info.size, info.storageId))
         if (info.isFolder || !(info.isRaw || info.isJpeg || info.isHeif || info.isVideo)) return
         files[handle] = info
         publish(HashMap(files))
         note("新拍：${info.filename}（${info.size / 1024} KB）")
         newShot(info)
+    }
+
+    /*
+     * Panasonic: ObjectAdded (0xC108) named [handle] but the camera refuses its ObjectInfo. Read
+     * the object whole (GetObject, else GetPartialObject in pieces) and tell RW2 from JPEG by its
+     * first bytes; the name comes from the handle's low 16 bits, which count up by one per shot
+     * and are the same for the RW2 and JPEG of one shot (0x191A036F and 0x121A036F), so the pair
+     * stays one item. A handle ending in 0000 (0x111A0000) is the folder: skipped.
+     */
+    private fun fetchWithoutInfo(c: PtpConnection, handle: Int) {
+        val tag = "松下"
+        if ((handle and 0xFFFF) == 0) {
+            note("$tag：0x%08X 低 16 位为 0，看起来是文件夹，跳过".format(handle))
+            return
+        }
+        val part = File(memoryDir(), "incoming.part")
+        val began = System.currentTimeMillis()
+        var how = "GetObject"
+        val got = try {
+            part.outputStream().buffered(1 shl 20).use { out ->
+                try {
+                    c.stream(Ptp.GET_OBJECT, intArrayOf(handle), out, { _, _ -> })
+                } catch (e: PtpException) {
+                    // refused before any data came: in pieces instead
+                    note("$tag：GetObject(0x%08X) 失败：%s，改用 GetPartialObject".format(handle, ptpDetail(e)))
+                    how = "GetPartialObject"
+                    var offset = 0L
+                    while (true) {
+                        val n = c.stream(Ptp.GET_PARTIAL_OBJECT, intArrayOf(handle, offset.toInt(), CHUNK), out, { _, _ -> })
+                        offset += n
+                        if (n < CHUNK) break
+                    }
+                    offset
+                }
+            }
+        } catch (e: Exception) {
+            note("$tag：读取 0x%08X 失败（%s），收到 %d 字节：%s".format(handle, how, part.length(), ptpDetail(e)))
+            ErrorLog.record("松下：读取新拍的照片 0x%08X".format(handle), e, usbReport(usbDevice, c))
+            part.delete()
+            return
+        }
+        val ms = (System.currentTimeMillis() - began).coerceAtLeast(1)
+        note("$tag：%s(0x%08X) → OK，%d 字节，%d ms，%.1f MB/s".format(how, handle, got, ms, got / 1048576.0 / (ms / 1000.0)))
+        val head = ByteArray(12)
+        val n = runCatching { part.inputStream().use { it.read(head) } }.getOrDefault(0)
+        fun at(i: Int) = head[i].toInt() and 0xFF
+        val ext = when {
+            n >= 4 && at(0) == 0x49 && at(1) == 0x49 && at(2) == 0x55 && at(3) == 0x00 -> "RW2" // "IIU\0"
+            n >= 2 && at(0) == 0xFF && at(1) == 0xD8 -> "JPG"
+            n >= 12 && String(head, 4, 4, Charsets.US_ASCII) == "ftyp" -> "HIF"
+            else -> null
+        }
+        if (ext == null || got <= 0) {
+            note("$tag：0x%08X 不是认得的照片（开头 %s），丢弃".format(handle, head.take(n.coerceAtLeast(0)).joinToString(" ") { "%02X".format(it) }))
+            part.delete()
+            return
+        }
+        val name = "P%07d.%s".format(handle and 0xFFFF, ext)
+        val local = ObjectInfo(MEMORY_BASE + memoryCount++, 0, if (ext == "JPG") Ptp.FORMAT_EXIF_JPEG else Ptp.FORMAT_UNDEFINED,
+            0, got, 0, 0, 0, 0, 0, name, nowStamp())
+        keepLocalShot(part, local, tag, "松下 0x%08X".format(handle))
     }
 
     // Lists the folders that hold pictures and takes whatever is new (cameras that send no events).
