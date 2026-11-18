@@ -410,7 +410,7 @@ object CameraHub {
     }
 
     private fun publish(found: Map<Int, ObjectInfo>) {
-        items = CameraItem.group(found.values)
+        items = CameraItem.group(found.values, profile?.brand == Brand.FUJIFILM)
         changed()
     }
 
@@ -895,6 +895,13 @@ object CameraHub {
             return ExifOrientation.read(head).also { orientations[info.key] = it }
         }
         val c = connection ?: return 1
+        // Fujifilm's GetPartialObject is not usable on X-T4 (see download()): even a 32 KB
+        // request desynchronises the bulk pipe when a shot arrives. GetThumb returns the
+        // embedded full-size JPEG with its EXIF, and is cached per file below.
+        if (profile?.brand == Brand.FUJIFILM) {
+            val head = runCatching { c.request(Ptp.GET_THUMB, info.handle) }.getOrNull() ?: return 1
+            return ExifOrientation.read(head).also { orientations[info.key] = it }
+        }
         if (device?.supports(Ptp.GET_PARTIAL_OBJECT) != true || isLocal(info.handle)) return 1
         val head = runCatching { c.request(Ptp.GET_PARTIAL_OBJECT, info.handle, 0, 32 * 1024) }.getOrNull() ?: return 1
         return ExifOrientation.read(head).also { orientations[info.key] = it }
@@ -1014,9 +1021,16 @@ object CameraHub {
         }
         // pictures held in camera memory (Nikon SDRAM, Sony PC Remote) are read whole
         val memory = (info.handle.toLong() and 0xFFFF0000L) == 0xFFFF0000L
-        val partial = device?.supports(Ptp.GET_PARTIAL_OBJECT) == true && !memory && info.size > 0
+        // Fujifilm advertises GetPartialObject but answers a large request (the 4 MB chunk
+        // below) with a malformed container, or caps it at 32 KB and leaves the bulk pipe
+        // out of step — the next response then has type 0x100E / code 0x1B56 and the
+        // connection is marked broken. X-T4 (2.12) supports plain GetObject (0x1009), so
+        // stream the whole file in one transaction for Fuji; events still arrive on the
+        // interrupt endpoint, so there is nothing to gain from interleaving chunks.
+        val fuji = profile?.brand == Brand.FUJIFILM
+        val partial = device?.supports(Ptp.GET_PARTIAL_OBJECT) == true && !memory && info.size > 0 && !fuji
         if (!partial) {
-            c.stream(Ptp.GET_OBJECT, intArrayOf(info.handle), out, progress)
+            c.stream(Ptp.GET_OBJECT, intArrayOf(info.handle), out, progress, timeout = 60000)
             return
         }
         // In pieces: thumbnails and events get the camera in between.
