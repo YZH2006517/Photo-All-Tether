@@ -37,6 +37,13 @@ struct DecodedRaw
   RawMeta meta;
   double xyz_to_camera[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // Adobe ColorMatrix (D65), rows R G B
   bool has_matrix = false;
+  // Set when this LibRaw has no colour matrix for the model (a body newer than its tables):
+  // the model whose matrix stands in (a recent one of the same maker). Empty otherwise.
+  std::string borrowed_matrix;
+  // A DNG LibRaw could not decode (JPEG XL tiles, DNG 1.7) read by the film engine's own DNG
+  // parser instead: raw holds its mosaic (or linear RGB, channels 3), white balance, matrix,
+  // lens shading and noise profile as the file gives them; the white stays as shot.
+  bool engine_dng = false;
   double as_shot_neutral[3] = {1, 1, 1};                  // camera RGB of a neutral, green = 1
   double daylight_neutral[3] = {1, 1, 1};                 // the same for D65 (pre_mul)
 
@@ -56,6 +63,10 @@ struct DecodeOptions
   // twice as large is demosaiced at half size (a 40 MP X-Trans file needs ~1 GB otherwise).
   int long_edge_hint = 0;
   bool force_generic = false; // testing: a Bayer file through the generic path
+  // testing: the file taken for an unknown body of this LibRaw maker index (its colour matrix
+  // cleared, even a DNG's), to exercise the stand-in matrix; -1 off
+  int test_unknown_maker = -1;
+  bool test_engine_dng = false; // testing: a DNG through the engine's DNG reader, as when LibRaw fails
 };
 
 // Decodes a raw file (path, or the file's bytes in memory). On success the white balance
@@ -71,6 +82,10 @@ bool generic_pixels(const DecodedRaw &decoded, int max_long_edge, White white, f
 
 // Centre-weighted log-average luminance of linear Rec.2020 RGBA (as the engine's raw_key).
 float rgba_key(const std::vector<float> &rgba, int width, int height);
+
+// The reference spektrafilm's meter on the same pixels (as the engine's raw_center_mean):
+// Gaussian weights, sigma 0.2 of the long edge, over linear luminance, the arithmetic mean.
+float rgba_center_mean(const std::vector<float> &rgba, int width, int height);
 
 // Recomputes raw.wb and raw.camera_to_rec2020 for the white balance. [kelvin] 2000..12000
 // and [tint] -1..1 (green-magenta, Duv about +-0.02) are used for White::Kelvin only.

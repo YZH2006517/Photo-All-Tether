@@ -17,7 +17,7 @@ import android.widget.TextView
 import org.photoall.tether.camera.CameraHub
 import org.photoall.tether.develop.DevelopQueue
 import org.photoall.tether.develop.Library
-import org.photoall.tether.develop.Roll
+import org.photoall.tether.engine.LutCatalog
 import org.photoall.tether.engine.Films
 import org.photoall.tether.engine.Recipe
 import java.text.SimpleDateFormat
@@ -28,21 +28,22 @@ import java.util.Locale
 /**
  * What is going on, beside the picture in the immersive view: a column on its right in
  * landscape, a two-column card under it in portrait ([wideCard]). The camera (its light,
- * name, battery, card); the roll (the stock and the frame count); this
- * picture (aperture, shutter, ISO in three cells, the lens, the recipe, how long it took); and
- * at the foot the darkroom (a ring while it works). Always dark, as the view around it is.
+ * name, battery, card); the film and the paper this picture was developed on (and its look);
+ * the picture (aperture, shutter, ISO in three cells, the lens, how long it took); and at the
+ * foot the darkroom (a ring while it works). Light or dark with the app's appearance.
  */
 @SuppressLint("ViewConstructor")
 class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose: () -> Unit) : FrameLayout(context) {
+    /** Its colours, following the app's appearance (light or dark), as the immersive view does. */
     private object C {
-        const val TEXT = 0xFFFFFFFF.toInt()
-        const val SUB = 0xFF8E8E93.toInt()
-        const val DIM = 0xFF48484A.toInt()
-        const val LINE = 0x1AFFFFFF
-        const val CELL = 0xFF151517.toInt()
-        const val ACCENT = 0xFFFF9F0A.toInt()
-        const val GREEN = 0xFF30D158.toInt()
-        const val RED = 0xFFFF453A.toInt()
+        val TEXT get() = Ui.TEXT
+        val SUB get() = Ui.SUB
+        val DIM get() = if (Ui.light) 0xFFC7C7CC.toInt() else 0xFF48484A.toInt()
+        val LINE get() = if (Ui.light) 0x1A000000 else 0x1AFFFFFF
+        val CELL get() = if (Ui.light) 0xFFF2F2F7.toInt() else 0xFF151517.toInt()
+        val ACCENT get() = Ui.ACCENT
+        val GREEN get() = Ui.GREEN
+        val RED get() = Ui.RED
     }
 
     private val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -50,7 +51,7 @@ class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose
 
     private val camDot = PulseDot(context)
     private val camName = text(14f, C.TEXT, bold = true).single()
-    private val battery = BatteryView(context).apply { onDark = true }
+    private val battery = BatteryView(context).apply { onDark = !Ui.light }
     private val batteryText = text(12f, C.SUB, bold = true).apply { typeface = Ui.mono }
     private val cardText = text(12f, C.SUB, bold = true).apply { typeface = Ui.mono }
     private val cardIcon = IconView(context, Glyph.SDCARD, C.SUB, 13)
@@ -72,7 +73,8 @@ class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose
             t.textSize = size
         }
     }
-    private val frames = text(12f, C.SUB, bold = true).apply { fontFeatureSettings = "tnum" }
+    /** The paper (or how it was scanned) under the film's name. */
+    private val paper = text(12f, C.SUB, bold = true).single()
 
     private val frameTitle = sectionLabel("本张")
     private val cells = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -87,7 +89,8 @@ class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose
 
     init {
         // a rounded card, lit a little from the top, with a hairline rim
-        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF141416.toInt(), 0xFF0A0A0B.toInt())).apply {
+        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            if (Ui.light) intArrayOf(0xFFFFFFFF.toInt(), 0xFFF7F7F9.toInt()) else intArrayOf(0xFF141416.toInt(), 0xFF0A0A0B.toInt())).apply {
             cornerRadius = dp(20).toFloat()
             setStroke(1, C.LINE)
         }
@@ -96,23 +99,35 @@ class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose
         // the pieces, the same in both shapes
         val top = row(camDot.also { it.layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)) }, camName, gap = 6)
         top.addView(context.iconButton(Glyph.CLOSE, C.SUB, 30, description = "退出沉浸") { onClose() }.apply {
-            background = pressable(context, 0xFF1C1C1E.toInt(), dp(15).toFloat())
+            background = pressable(context, Ui.SURFACE2, dp(15).toFloat())
         }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(6) })
         val power = row(battery, batteryText, gap = 5)
         val card = row(cardIcon.also { it.layoutParams = LinearLayout.LayoutParams(dp(13), dp(13)) }, cardText, gap = 4)
+        // a narrow column (a large font): the card's free space takes what is left of the line and
+        // shrinks to fit it rather than be cut ("55.3 GB")
+        cardText.apply {
+            isSingleLine = true
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setAutoSizeTextTypeUniformWithConfiguration(8, 12, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            layoutParams = LinearLayout.LayoutParams(0, dp(15), 1f).apply { marginStart = dp(4) }
+        }
+        card.gravity = Gravity.CENTER_VERTICAL or Gravity.END
         powerRow.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(power)
-            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(card)
+            addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         }
+        // what this picture was developed on: the film, the paper under it
         val roll = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(IconView(context, Glyph.ROLL, C.ACCENT, 14), LinearLayout.LayoutParams(dp(14), dp(14)).apply { marginEnd = dp(5) })
-            addView(film, LinearLayout.LayoutParams(0, dp(18), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
-            addView(frames, lp().apply { marginStart = dp(6) })
+            orientation = LinearLayout.VERTICAL
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(IconView(context, Glyph.ROLL, C.ACCENT, 14), LinearLayout.LayoutParams(dp(14), dp(14)).apply { marginEnd = dp(5) })
+                addView(film, LinearLayout.LayoutParams(0, dp(18), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
+            })
+            addView(paper, lp().apply { topMargin = dp(3); marginStart = dp(19) })
         }
         val ringBox = FrameLayout(context)
         ringBox.addView(ring, LayoutParams(dp(30), dp(30)))
@@ -201,23 +216,37 @@ class InfoPanel(context: Context, private val wideCard: Boolean = false, onClose
         cardIcon.visibility = if (free > 0) View.VISIBLE else View.GONE
         powerRow.visibility = if (level != null || free > 0) View.VISIBLE else View.GONE
 
-        // roll
-        val loaded = Roll.film(context)
-        val n = Roll.frames(context)
-        film.text = if (loaded >= 0) Films.short(loaded) else "未装片"
+        // the film and paper this picture was developed on (not the roll counter)
+        val r = entry?.recipe?.let { runCatching { Recipe.fromJson(it) }.getOrNull() }
+        film.text = when {
+            r == null -> entry?.name ?: "—"
+            !r.filmOn -> "无胶片"
+            else -> Films.short(r.film)
+        }
         fit(film)
-        frames.text = "$n/${Roll.FRAMES}"
+        paper.text = when {
+            r == null || !r.filmOn -> ""
+            Films.kind(r.film) == "反转片" || !r.printOn -> "直接扫描"
+            else -> Films.paperShort(r.paper)
+        }
+        paper.visibility = if (paper.text.isNullOrEmpty()) View.GONE else View.VISIBLE
 
         // this picture
-        frameTitle.text = if (count > 0) "本张 · ${index + 1}/$count" else "本张"
+        frameTitle.text = "本张"
         cells.removeAllViews()
         val m = entry?.meta ?: emptyMap()
         cell(Glyph.APERTURE, m["aperture"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { "f/" + "%.1f".format(it).removeSuffix(".0") })
         cell(Glyph.TIMER, m["shutter"]?.toDoubleOrNull()?.takeIf { it > 0 }?.let { if (it >= 0.3) "%.1f″".format(it).replace(".0″", "″") else "1/${Math.round(1 / it)}" })
         cell(Glyph.SUN, m["iso"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { it.toInt().toString() })
-        val r = entry?.recipe?.let { runCatching { Recipe.fromJson(it) }.getOrNull() }
-        recipe.text = r?.summary() ?: (entry?.name ?: "—")
-        recipe.setTextColor(if (r != null) C.ACCENT else C.SUB)
+        // the look on top of film and paper, when there is one (LUT, diffusion filter)
+        recipe.text = r?.let {
+            listOfNotNull(
+                it.lut?.takeIf { _ -> it.lutOn }?.let { id -> "LUT " + LutCatalog.label(id) },
+                Recipe.diffusionNames.getOrNull(it.diffusion)?.takeIf { _ -> it.filmOn && it.diffusion > 0 }?.let { d -> "$d 滤镜" },
+            ).joinToString(" · ")
+        } ?: ""
+        recipe.setTextColor(C.SUB)
+        recipe.visibility = if (recipe.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         // the focal length and how long the print took; when it was taken under that
         val seconds = entry?.note?.let { Regex("总用时\\t([0-9.]+)").find(it)?.groupValues?.get(1) }
         val shot = entry?.shotTime?.takeIf { it > 0 }?.let { SimpleDateFormat("M月d日 HH:mm", Locale.CHINA).format(Date(it)) }

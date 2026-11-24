@@ -270,6 +270,7 @@ class MainActivity : AdaptiveActivity() {
         super.onResume()
         // back from the LUT page (or anything else that changed the recipe)
         (pages[2] as? RecipePage)?.reload()
+        if (pendingTab >= 0) { showTab(pendingTab); pendingTab = -1 }
     }
 
     override fun onStart() {
@@ -405,7 +406,7 @@ class MainActivity : AdaptiveActivity() {
         for (uri in uris) {
             val name = displayName(uri) ?: continue
             val ext = name.substringAfterLast('.', "").uppercase()
-            if (ext !in org.photoall.tether.ptp.ObjectInfo.RAW_EXTENSIONS && ext != "JPG" && ext != "JPEG") { refused++; continue }
+            if (ext !in org.photoall.tether.ptp.ObjectInfo.RAW_EXTENSIONS && ext !in setOf("JPG", "JPEG", "HIF", "HEIC", "HEIF")) { refused++; continue }
             DevelopQueue.addLocal(this, uri, name)
             added++
         }
@@ -421,9 +422,11 @@ class MainActivity : AdaptiveActivity() {
         }
     }.getOrNull()
 
-    private companion object {
-        const val REQUEST_PICK = 11
-        const val REQUEST_DELETE = 12
+    companion object {
+        private const val REQUEST_PICK = 11
+        private const val REQUEST_DELETE = 12
+        /** A page to show when the main screen comes back (the immersive view swiped down to the recipe). */
+        @Volatile var pendingTab = -1
     }
 }
 

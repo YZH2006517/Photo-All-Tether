@@ -85,7 +85,7 @@ class LutActivity : AdaptiveActivity() {
         bar.addView(iconButton(Glyph.CHEVRON_LEFT, Ui.ACCENT, 40, filled = false, description = "返回") { finish() })
         bar.addView(label("风格 LUT", Ui.TITLE, Ui.TEXT, bold = true).single(),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
-        bar.addView(button("导入", primary = true, glyph = Glyph.PLUS) { pickFiles() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
+        bar.addView(button("导入", primary = true, glyph = Glyph.PLUS) { pickFiles() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // ---- the picture, with the chosen LUT; held, without
         val frame = FrameLayout(this).apply { background = rounded(Ui.SURFACE, dp(18).toFloat()); clipToOutline = true }

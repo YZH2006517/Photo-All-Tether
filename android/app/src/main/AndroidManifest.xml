@@ -39,6 +39,9 @@
         <activity android:name=".ui.CameraInfoActivity" android:exported="false" android:screenOrientation="behind" />
         <activity android:name=".ui.LutActivity" android:exported="false" android:screenOrientation="behind"
             android:windowSoftInputMode="adjustNothing" />
+        <!-- turning only rearranges the bench (the picture and its develops stay) -->
+        <activity android:name=".ui.TuneActivity" android:exported="false" android:screenOrientation="behind"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".ui.Cartridge3DActivity" android:exported="false" android:hardwareAccelerated="true" android:screenOrientation="behind"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".ui.ImmersiveActivity" android:exported="false"

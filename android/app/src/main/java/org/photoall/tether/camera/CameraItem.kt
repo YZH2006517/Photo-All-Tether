@@ -8,7 +8,8 @@ import org.photoall.tether.ptp.ObjectInfo
  */
 class CameraItem(val files: List<ObjectInfo>) {
     val raw: ObjectInfo? get() = files.firstOrNull { it.isRaw }
-    val jpeg: ObjectInfo? get() = files.firstOrNull { it.isJpeg }
+    /** The camera's own picture of the shot: its JPEG, or its HEIF (Sony, Canon, Fujifilm HIF). */
+    val jpeg: ObjectInfo? get() = files.firstOrNull { it.isJpeg } ?: files.firstOrNull { it.isHeif }
     val primary: ObjectInfo get() = raw ?: jpeg ?: files.first()
 
     val name: String get() = primary.baseName
@@ -21,9 +22,9 @@ class CameraItem(val files: List<ObjectInfo>) {
 
     /** What the item holds: "RAW+JPG", "RAW", "JPG", "HEIF", "MOV". */
     val badge: String get() = when {
-        raw != null && jpeg != null -> "${raw!!.extension}+JPG"
+        raw != null && jpeg != null -> "${raw!!.extension}+${if (jpeg!!.isHeif) "HEIF" else "JPG"}"
         raw != null -> raw!!.extension
-        jpeg != null -> "JPG"
+        jpeg != null -> if (jpeg!!.isHeif) "HEIF" else "JPG"
         else -> primary.extension
     }
 

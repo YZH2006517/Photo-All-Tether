@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicReference
  * recipe being edited. Only the newest request is rendered.
  */
 object Preview {
+    /** The print developed from the raw now held here (its library uri), when known. */
+    @Volatile var latestPrint: String? = null
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "preview") }
     private val main = Handler(Looper.getMainLooper())
     private val pending = AtomicReference<Pair<Recipe, (Bitmap?, String?) -> Unit>?>(null)
@@ -81,7 +83,7 @@ object Preview {
                     raw = RawFile.open(file.path, 1280)
                     rawPath = file.path
                 }
-                val developed = FilmEngine.get(app).developRaw(raw!!, r, 1280, key, 7, app)
+                val developed = FilmEngine.get(app).developRaw(raw!!, r, 1280, key, 7, app, Prefs.displayP3(app))
                 main.post { callback(developed.bitmap, null) }
             } catch (e: Throwable) {
                 main.post { callback(null, e.message ?: e.toString()) }

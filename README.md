@@ -2,13 +2,13 @@
 
 相机拍摄后自动传至手机，在手机中模拟真实胶片冲洗效果。
 
-胶片引擎、胶片 / 相纸光谱数据和 LUT 都来自 [Photo-All-Android](https://github.com/YZH2006517/Photo-All-Android)，原样复用；它是 [spektrafilm](https://github.com/andreavolpato/spektrafilm) 在 [vkdt](https://github.com/hanatos/vkdt) 中 GPU 实现的移植。这个项目做的是另一半：USB 连接相机、管理存储卡里的照片，以及解码各品牌的 RAW。
+胶片引擎（`engine/`）来自 Photo All 0.3.0，胶片 / 相纸光谱数据和 LUT 来自 [Photo-All-Android](https://github.com/YZH2006517/Photo-All-Android)；引擎是 [spektrafilm](https://github.com/andreavolpato/spektrafilm) 在 [vkdt](https://github.com/hanatos/vkdt) 中 GPU 实现的移植。这个项目做的是另一半：USB 连接相机、管理存储卡里的照片，以及解码各品牌的 RAW。
 
-> 当前版本 **0.1.3**：松下（如 DC-G100D）联机拍摄的新照片可以收进来了；修复在系统相册里删过的成片再在软件里删除会闪退。0.1.2 起尼康高效率 RAW（HE / HE★）给出明确提示、RAW+JPEG 自动改用 JPEG 冲洗，见 [更新记录](CHANGELOG.md)。真机只测过**尼康 Z 6II**，其他品牌已按 libgphoto2 的做法适配，还没在真机上验证，见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
+> 当前版本 **0.1.5**：换用新的胶片引擎（重新标定到原版 spektrafilm）；新增调参台；沉浸模式可直接上滑调配方，新照片按引擎每一步的真实渲染显现，并实时显示冲洗流程和手机状态；支持更多新机型、JPEG XL DNG 和 HEIF，可选 16 位无损 TIFF。见 [更新记录](CHANGELOG.md)。真机只测过**尼康 Z 6II**，其他品牌已按 libgphoto2 的做法适配，还没在真机上验证，见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
 
 ## 下载
 
-**[下载 PhotoAll-Tether-0.1.3.apk](https://github.com/YZH2006517/Photo-All-Tether/releases/download/v0.1.3/PhotoAll-Tether-0.1.3.apk)** · [所有版本](https://github.com/YZH2006517/Photo-All-Tether/releases) · [更新记录](CHANGELOG.md)
+**[下载 PhotoAll-Tether-0.1.5.apk](https://github.com/YZH2006517/Photo-All-Tether/releases/download/v0.1.5/PhotoAll-Tether-0.1.5.apk)** · [所有版本](https://github.com/YZH2006517/Photo-All-Tether/releases) · [更新记录](CHANGELOG.md)
 
 - 在手机上打开 APK 安装，需要允许安装未知来源应用
 - Android 10（API 29）及以上，64 位 ARM（arm64-v8a），GPU 支持 Vulkan 1.1，手机支持 USB OTG
@@ -23,7 +23,7 @@
 - 用 USB-C 线连接相机，插上后应用自动打开
 - 用相机自己的快门拍，RAW 自动传到手机（约 25 MB/s），按当前配方冲洗；连拍时会排队，一张在传，一张在冲
 - 冲洗前先把亮度对齐相机机内 JPEG 的亮度，所见即所得（尼康 RAW 一般比机内 JPEG 暗 1–2 档）
-- 沉浸模式：全屏只显示冲洗好的成片，新照片冲好就自动淡入换上；3D 暗盒开场动画；横屏右侧一栏、竖屏下方卡片显示相机、胶卷、本张参数和暗房状态
+- 沉浸模式：全屏只显示冲洗好的成片；新照片按引擎每一步的真实渲染显现，冲洗时实时显示流程、传输速度、GPU 与内存；上滑调配方（左右实时对比），下滑退出，左右滑动翻页；横屏右侧一栏、竖屏下方卡片显示相机、胶卷、本张参数和暗房状态
 - 胶卷计数：一卷 36 张，3D 暗盒随拍摄走片，拍完自动倒片
 - 前台服务：锁屏或切到别的应用时，照片照样接收和冲洗
 
@@ -37,8 +37,10 @@
 - 22 种胶片、9 种相纸，用 3D 胶卷暗盒和相纸盒 / 片盒滑动选择；放大机滤色（自动中性 / 保留胶片本色）
 - 400 多个内置创意 LUT，可导入自己的 .cube / .3dl / Hald CLUT / .zip；每个 LUT 用最新照片实时出小样，支持搜索、收藏、最近使用、分组、重命名和删除
 - 曝光补偿；白平衡可选相机、按胶片、日光、钨丝灯或自定义色温；颗粒、光晕、DIR 耦合剂、RAW 降噪
-- 胶片引擎的全部可调参数，按类别折叠
+- 胶片引擎的全部可调参数，按类别折叠；颗粒强度、画幅、柔光滤镜、局部影调（单张 HDR）
 - 配方页用最新一张 RAW 实时预览
+- 调参台：一张照片边调边看，拖线对比原图与冲洗效果，双指放大看颗粒
+- 默认原尺寸冲洗；可选 16 位无损 TIFF、Display P3 广色域
 
 **暗房**
 - 处理队列：显示传输和冲洗进度
@@ -62,7 +64,7 @@
 | 富士 | 已适配：联机模式下定时查找新文件；X-Trans 由 LibRaw 去马赛克 |
 | 松下、OM System、宾得、徕卡、适马、哈苏 | 按标准 PTP 处理 |
 
-RAW 解码用 [LibRaw](https://www.libraw.org/) 0.22.3，支持 1200 多种机型。拜耳传感器的去马赛克和后续处理都由胶片引擎在 GPU 上做；X-Trans、Foveon 等其他传感器先由 LibRaw 去马赛克。**尼康 HE / HE★ 高效 RAW 不支持**，请在相机里选「无损压缩」或「压缩」。
+RAW 解码用 [LibRaw](https://www.libraw.org/)（2026 年 11 月主干），支持 1200 多种机型；还不认识的新机型借用同品牌相近机型的色彩数据。JPEG XL 压缩的 DNG（三星 Expert RAW、DNG 1.7）由胶片引擎自带的 DNG 读取器解。拜耳传感器的去马赛克和后续处理都由胶片引擎在 GPU 上做；X-Trans、Foveon 等其他传感器先由 LibRaw 去马赛克。**尼康 HE / HE★ 高效 RAW 不支持**，请在相机里选「无损压缩」或「压缩」。
 
 各品牌在相机上要怎么设置、有哪些已知问题，见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
 
@@ -85,10 +87,12 @@ cd Photo-All-Tether/android
 ./gradlew assembleDebug
 ```
 
-两个子模块：
+胶片引擎的源码在 `engine/`（说明见 [engine/README.md](engine/README.md)）。子模块：
 
-- `third_party/Photo-All-Android`：胶片引擎源码和胶片 / LUT 数据，原样编译进来。想用自己的另一份代码，可以加参数 `-Pphotoall.phone=<路径>`。
+- `third_party/Photo-All-Android`：胶片 / 相纸光谱数据和 LUT。想用自己的另一份，可以加参数 `-Pphotoall.phone=<路径>`。
 - `third_party/LibRaw`：RAW 解码库。
+- `third_party/libjpeg-turbo`：LibRaw 解有损压缩 DNG 用。
+- `third_party/libjxl`：JPEG XL 压缩 DNG 用。
 
 ### 桌面测试工具
 
@@ -114,19 +118,26 @@ android/                Android 应用（Kotlin，无第三方依赖）
     develop/            传输 / 冲洗队列、本机相册、配方预览
     engine/             胶片引擎的 Kotlin 接口、配方、LUT
     ui/                 相机、暗房、配方、设置四个页面，看图和沉浸模式
+engine/                 胶片引擎（Vulkan 计算着色器），见 engine/README.md
 native/
   src/camera_raw.*      LibRaw → 引擎的 RawImage（拜耳）或线性 Rec.2020（其他传感器）
+  src/tiff16.*          16 位无损 TIFF
   desktop/              桌面测试工具 nef_develop
 docs/COMPATIBILITY.md   各品牌兼容性与调研记录
-third_party/            子模块：Photo-All-Android、LibRaw
+third_party/            子模块：Photo-All-Android、LibRaw、libjpeg-turbo、libjxl
+tools/check_engine_params.py  核对配方参数与引擎是否对齐
 ```
 
 ## 第三方代码与许可
 
 | 内容 | 来源 | 许可 |
 |---|---|---|
-| 胶片引擎、光谱数据、LUT | [Photo-All-Android](https://github.com/YZH2006517/Photo-All-Android)（其中各部分的来源见该仓库） | GPL-3.0 及各自的许可 |
-| RAW 解码 | [LibRaw](https://github.com/LibRaw/LibRaw) 0.22.3 | LGPL-2.1 / CDDL-1.0 |
+| 胶片引擎（`engine/` 的自有代码） | Photo All 0.3.0，见 [engine/README.md](engine/README.md) | **CC BY-NC 4.0**（仅限非商业使用） |
+| 引擎着色器（vkdt filmsim、降噪） | [vkdt](https://github.com/hanatos/vkdt) | BSD-2-Clause |
+| 胶片 / 相纸光谱数据、LUT | [Photo-All-Android](https://github.com/YZH2006517/Photo-All-Android)（光谱数据来自 [spektrafilm](https://github.com/andreavolpato/spektrafilm)） | CC BY-SA 4.0 及各自的许可 |
+| RAW 解码 | [LibRaw](https://github.com/LibRaw/LibRaw)（2026-11 主干） | LGPL-2.1 / CDDL-1.0 |
+| 有损 DNG 解码 | [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) 3.2.1 | IJG / BSD-3-Clause / zlib |
+| JPEG XL DNG 解码 | [libjxl](https://github.com/libjxl/libjxl) 0.11.2 | BSD-3-Clause |
 | 各品牌 PTP 扩展的资料 | [libgphoto2](https://github.com/gphoto/libgphoto2) `camlibs/ptp2`（只作参考，代码是重新写的） | LGPL-2.1 |
 
-本项目以 [GPL-3.0](LICENSE) 发布（引擎中移植的 hdr-plus-swift 代码要求如此）。相机品牌和型号名称属于各自的所有者，本项目与这些公司没有关联。
+本项目的应用代码以 [GPL-3.0](LICENSE) 发布；`engine/` 目录里的胶片引擎自有代码单独适用 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)，只可用于非商业用途，详见 [engine/README.md](engine/README.md)。相机品牌和型号名称属于各自的所有者，本项目与这些公司没有关联。

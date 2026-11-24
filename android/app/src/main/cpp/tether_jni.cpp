@@ -1,10 +1,11 @@
-// JNI bridge for org.photoall.tether.engine.TetherNative: the phone app's film engine, fed
-// from camera raw files (LibRaw) or from camera JPEGs.
+// JNI bridge for org.photoall.tether.engine.TetherNative: the film engine (engine/, Photo All
+// 0.3.0's), fed from camera raw files (LibRaw) or from camera JPEGs.
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <jni.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -17,6 +18,7 @@
 
 #include "camera_raw.h"
 #include "film_engine.h"
+#include "tiff16.h"
 
 namespace {
 
@@ -118,7 +120,8 @@ void add_note(std::string &note, const char *section, const char *key, const std
 
 extern "C" {
 
-JNIEXPORT jlong JNICALL Java_org_photoall_tether_engine_TetherNative_engineCreate(JNIEnv *env, jclass, jobject assets_java)
+JNIEXPORT jlong JNICALL Java_org_photoall_tether_engine_TetherNative_engineCreate(JNIEnv *env, jclass, jobject assets_java,
+                                                                           jboolean safe_shaders)
 {
   JNI_TRY
   AAssetManager *assets = AAssetManager_fromJava(env, assets_java);
@@ -131,9 +134,9 @@ JNIEXPORT jlong JNICALL Java_org_photoall_tether_engine_TetherNative_engineCreat
     return 0;
   }
   auto handle = std::make_unique<Engine>();
-  // No HDR+ merge kernels: a camera frame is developed alone (and some Mali drivers crash
-  // compiling them).
-  handle->engine = film::FilmEngine::create(filmsim, spectra, error, false);
+  // A camera frame is developed alone (no burst). safe_shaders: the unoptimised SPIR-V, for a
+  // driver whose compiler fails on the optimised kernels.
+  handle->engine = film::FilmEngine::create(filmsim, spectra, error, false, safe_shaders);
   if(!handle->engine)
   {
     throw_java(env, error);
@@ -227,6 +230,7 @@ JNIEXPORT jstring JNICALL Java_org_photoall_tether_engine_TetherNative_rawMeta(J
   put("orientation", std::to_string(r.orientation));
   put("bits", std::to_string(m.bits));
   put("decoder", m.decoder);
+  if(!raw->decoded.borrowed_matrix.empty()) put("matrix", raw->decoded.borrowed_matrix);
   put("bayer", raw->decoded.bayer ? "1" : "0");
   if(!raw->decoded.bayer) put("demosaic", raw->decoded.demosaic);
   std::snprintf(line, sizeof(line), "%.0f %.0f %.0f %.0f / %.0f", r.black[0], r.black[1], r.black[2], r.black[3], r.white);
@@ -255,11 +259,13 @@ JNIEXPORT jbyteArray JNICALL Java_org_photoall_tether_engine_TetherNative_embedd
 
 // Develops a decoded raw. white: 0 as shot, 1 kelvin (+ tint). match_key > 0: the camera
 // JPEG's centre-weighted key, the develop starts from that brightness (as the phone app
-// matches its viewfinder). Returns {width, height, passes, peak bytes, gpu us, orientation}.
+// matches its viewfinder); < 0: the reference spektrafilm's own meter (centre-weighted mean to
+// mid grey, never below the exposure shot); 0: the raw's own exposure.
+// Returns {width, height, passes, peak bytes, gpu us, orientation}.
 JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_developRaw(
     JNIEnv *env, jclass, jlong engine_h, jlong raw_h, jobjectArray names, jfloatArray values, jint max_long_edge,
     jfloat exposure_ev, jint seed, jfloat match_key, jint white, jfloat kelvin, jfloat tint, jfloat raw_denoise,
-    jfloat chroma_denoise)
+    jfloat chroma_denoise, jfloat local_tone, jboolean display_p3, jboolean output16)
 {
   JNI_TRY
   Engine *engine = reinterpret_cast<Engine *>(engine_h);
@@ -273,6 +279,9 @@ JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_develo
   options.match_key = match_key;
   options.raw_denoise = raw_denoise;
   options.chroma_denoise = chroma_denoise;
+  options.local_tone = std::clamp(local_tone, 0.0f, 1.0f);
+  options.output = display_p3 ? film::ColourSpace::DisplayP3 : film::ColourSpace::Srgb;
+  options.output16 = output16;
 
   std::lock_guard<std::mutex> raw_lock(raw->mutex);
   std::string error;
@@ -280,6 +289,7 @@ JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_develo
   film::SourceImage source;
   std::vector<float> generic;
   float generic_key = 0.0f;
+  std::string generic_meter;
   if(raw->decoded.bayer)
   {
     if(!camraw::apply_white(raw->decoded, mode, kelvin, tint, error))
@@ -305,6 +315,19 @@ JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_develo
     source.space = film::ColourSpace::LinearRec2020;
     generic_key = camraw::rgba_key(generic, gw, gh);
     if(match_key > 0 && generic_key > 0) options.exposure_ev += std::log2(match_key / generic_key);
+    if(match_key < 0)
+    { // the engine meters raw sources only: the same meter here (see film::raw_center_mean)
+      const float mean = camraw::rgba_center_mean(generic, gw, gh);
+      if(mean > 0)
+      {
+        const float metered = std::clamp(-std::log2(mean / 0.184f), -6.0f, 6.0f);
+        const float ev = std::max(metered, 0.0f);
+        options.exposure_ev += ev;
+        char line[96];
+        std::snprintf(line, sizeof(line), "测光 %.4f → %+.2f EV%s", mean, ev, ev != metered ? "（不低于拍摄曝光）" : "");
+        generic_meter = line;
+      }
+    }
     options.match_key = 0;
     options.raw_denoise = 0;
   }
@@ -319,14 +342,20 @@ JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_develo
   char line[160];
   add_note(engine->last.note, "RAW 数据", "相机", m.make + " " + m.model);
   add_note(engine->last.note, "RAW 数据", "解码", "LibRaw " + m.decoder);
+  if(!raw->decoded.borrowed_matrix.empty())
+    add_note(engine->last.note, "RAW 数据", "色彩矩阵",
+             "LibRaw 未收录本机型，借用同品牌 " + raw->decoded.borrowed_matrix + " 的矩阵（颜色可能略有偏差）");
   if(raw->decoded.bayer)
   {
     std::snprintf(line, sizeof(line), "%d×%d，%d 位，黑 %.0f 白 %.0f", r.width, r.height, m.bits, r.black[0], r.white);
     add_note(engine->last.note, "RAW 数据", "传感器", line);
-    std::snprintf(line, sizeof(line), "%s，增益 %.3f / %.3f / %.3f", white == 1 ? "按色温" : "相机记录", r.wb[0],
-                  r.wb[1], r.wb[2]);
+    std::snprintf(line, sizeof(line), "%s，增益 %.3f / %.3f / %.3f",
+                  raw->decoded.engine_dng && (white != 1 || !raw->decoded.has_matrix) ? "相机记录（DNG 自带）"
+                  : white == 1 ? "按色温" : "相机记录",
+                  r.wb[0], r.wb[1], r.wb[2]);
     add_note(engine->last.note, "RAW 数据", "白平衡", line);
-    std::snprintf(line, sizeof(line), "%.4f（相机 JPEG %.4f）", film::raw_key(r), match_key);
+    if(match_key < 0) std::snprintf(line, sizeof(line), "%.4f（按原版测光）", film::raw_key(r));
+    else std::snprintf(line, sizeof(line), "%.4f（相机 JPEG %.4f）", film::raw_key(r), match_key);
     add_note(engine->last.note, "RAW 数据", "亮度 key", line);
   }
   else
@@ -335,18 +364,21 @@ JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_develo
     std::snprintf(line, sizeof(line), "%d×%d，%d 位", raw->decoded.rgb_width, raw->decoded.rgb_height, m.bits);
     add_note(engine->last.note, "RAW 数据", "传感器", line);
     add_note(engine->last.note, "RAW 数据", "白平衡", white == 1 ? "按色温（相机空间重新配平）" : "相机记录");
-    std::snprintf(line, sizeof(line), "%.4f（相机 JPEG %.4f）", generic_key, match_key);
+    if(match_key < 0) std::snprintf(line, sizeof(line), "%.4f（按原版测光）", generic_key);
+    else std::snprintf(line, sizeof(line), "%.4f（相机 JPEG %.4f）", generic_key, match_key);
     add_note(engine->last.note, "RAW 数据", "亮度 key", line);
+    if(!generic_meter.empty()) add_note(engine->last.note, "冲洗曝光", "原版曝光（中央重点）", generic_meter);
   }
   return result_info(env, engine->last, r.orientation);
   JNI_CATCH(env)
   return nullptr;
 }
 
-// Develops an 8-bit picture (a camera JPEG). restore 0..1 takes the camera's rendering off first.
+// Develops an 8-bit picture (a camera JPEG). Its own stages come with the parameters ("stage
+// restore" takes the camera's rendering off first, "stage meter", "stage temp" / "stage tint").
 JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_developBitmap(
     JNIEnv *env, jclass, jlong engine_h, jobject bitmap, jobjectArray names, jfloatArray values, jint max_long_edge,
-    jfloat exposure_ev, jint seed, jfloat restore)
+    jfloat exposure_ev, jint seed, jfloat local_tone, jboolean display_p3, jboolean output16)
 {
   JNI_TRY
   Engine *engine = reinterpret_cast<Engine *>(engine_h);
@@ -356,7 +388,9 @@ JNIEXPORT jlongArray JNICALL Java_org_photoall_tether_engine_TetherNative_develo
   options.max_long_edge = max_long_edge;
   options.exposure_ev = exposure_ev;
   options.seed = static_cast<uint32_t>(seed);
-  options.stages.restore = restore;
+  options.local_tone = std::clamp(local_tone, 0.0f, 1.0f);
+  options.output = display_p3 ? film::ColourSpace::DisplayP3 : film::ColourSpace::Srgb;
+  options.output16 = output16;
 
   AndroidBitmapInfo info;
   void *pixels = nullptr;
@@ -407,6 +441,29 @@ JNIEXPORT void JNICALL Java_org_photoall_tether_engine_TetherNative_copyResult(J
     std::memcpy(static_cast<uint8_t *>(pixels) + static_cast<size_t>(y) * info.stride,
                 &last.rgba8[static_cast<size_t>(y) * last.width * 4], static_cast<size_t>(last.width) * 4);
   AndroidBitmap_unlockPixels(env, bitmap);
+  JNI_CATCH(env)
+}
+
+// The last develop's 16-bit result (develop... with output16) as a TIFF at [path], turned upright
+// by [orientation]; its 16-bit data is released after. Throws when there is none or it fails.
+JNIEXPORT void JNICALL Java_org_photoall_tether_engine_TetherNative_writeTiff(
+    JNIEnv *env, jclass, jlong engine_h, jstring path, jint orientation, jboolean display_p3, jstring make, jstring model,
+    jstring software, jstring description, jstring date_time)
+{
+  JNI_TRY
+  Engine *engine = reinterpret_cast<Engine *>(engine_h);
+  std::lock_guard<std::mutex> lock(engine->mutex);
+  film::DevelopResult &last = engine->last;
+  if(last.rgba16.size() != static_cast<size_t>(last.width) * last.height * 4)
+  {
+    throw_java(env, "没有 16 位冲洗结果");
+    return;
+  }
+  tiff16::Meta meta{str(env, make), str(env, model), str(env, software), str(env, description), str(env, date_time)};
+  std::string error;
+  const bool ok = tiff16::write(str(env, path), last.rgba16.data(), last.width, last.height, orientation, display_p3, meta, error);
+  std::vector<uint16_t>().swap(last.rgba16); // hundreds of MB: not kept
+  if(!ok) throw_java(env, error);
   JNI_CATCH(env)
 }
 

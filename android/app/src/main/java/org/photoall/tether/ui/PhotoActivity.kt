@@ -40,6 +40,12 @@ class PhotoActivity : AdaptiveActivity() {
     private var entries: List<Library.Entry> = emptyList()
     private var index = 0
     private var token = 0
+    private lateinit var root: FrameLayout
+    /** The picture on screen (what the histogram counts). */
+    private var shown: Bitmap? = null
+    /** The info panel while it is open (its scrim, holding the panel). */
+    private var sheet: FrameLayout? = null
+    private var backCallback: Any? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,7 +55,7 @@ class PhotoActivity : AdaptiveActivity() {
         index = savedInstanceState?.getInt("index")?.takeIf { it in entries.indices }
             ?: entries.indexOfFirst { it.id == intent.getLongExtra(ID, 0) }.coerceAtLeast(0)
 
-        val root = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
+        root = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
         image = ZoomImageView(this)
         image.onSwipe = { go(index + it) }
         image.onTap = { bars.forEach { b -> b.visibility = if (b.visibility == View.VISIBLE) View.GONE else View.VISIBLE } }
@@ -101,12 +107,16 @@ class PhotoActivity : AdaptiveActivity() {
         bars = listOf(top, bottom)
         setContentView(root)
         padForSystemBars(root)
-        if (entries.isEmpty()) finish() else go(index)
+        if (entries.isEmpty()) finish() else {
+            go(index)
+            if (savedInstanceState?.getBoolean("info") == true) openInfo(animate = false)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("index", index)
+        outState.putBoolean("info", sheet != null) // the panel stays open when the phone turns
     }
 
     private fun current() = entries.getOrNull(index)
@@ -123,12 +133,16 @@ class PhotoActivity : AdaptiveActivity() {
         val t = ++token
         spinner.visibility = View.VISIBLE
         image.setImageBitmap(null)
+        shown = null
+        if (sheet != null) openInfo(animate = false) // the panel follows the swipe
         loader.execute {
             val bmp = runCatching { load(e) }.getOrNull()
             runOnUiThread {
                 if (t != token) return@runOnUiThread
                 spinner.visibility = View.GONE
                 if (bmp != null) {
+                    shown = bmp
+                    sheet?.let { refreshHistogram() }
                     image.setImageBitmap(bmp)
                     image.alpha = 0f
                     image.animate().alpha(1f).setDuration(260).start()
@@ -159,51 +173,202 @@ class PhotoActivity : AdaptiveActivity() {
         return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
-    private fun showInfo() {
+    /** The photo's whole record as plain text (copied from the info panel). */
+    private fun recordText(e: Library.Entry): String = buildString {
+        appendLine(e.name)
+        appendLine(if (e.kind == Library.PRINT) "成片 · ${e.width}×${e.height}" else "原片 · ${e.mime}")
+        e.recipe?.let { appendLine("配方：" + runCatching { Recipe.fromJson(it).summary() }.getOrDefault("")) }
+        shotLines(e).forEach { appendLine(it) }
+        for ((section, rows) in record(e)) {
+            appendLine()
+            appendLine("【$section】")
+            rows.forEach { (k, v) -> appendLine("$k：$v") }
+        }
+    }
+
+    private fun shotLines(e: Library.Entry): List<String> {
+        val m = e.meta
+        return listOfNotNull(
+            m["make"]?.let { "$it ${m["model"] ?: ""}".trim() },
+            m["lens"]?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    /** The develop's record ("section\tkey\tvalue" lines), by section in order. */
+    private fun record(e: Library.Entry): List<Pair<String, List<Pair<String, String>>>> {
+        val out = mutableListOf<Pair<String, MutableList<Pair<String, String>>>>()
+        for (line in e.note.lines()) {
+            val parts = line.split('\t')
+            if (parts.size < 3) continue
+            if (out.lastOrNull()?.first != parts[0]) out += parts[0] to mutableListOf()
+            out.last().second += parts[1] to parts.drop(2).joinToString(" ")
+        }
+        return out
+    }
+
+    // ---- the info panel ------------------------------------------------------------------------
+
+    private val wide get() = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    private var histogram: HistogramView? = null
+    private var clipLine: TextView? = null
+
+    private fun showInfo() = if (sheet != null) closeInfo() else openInfo(animate = true)
+
+    /**
+     * The photo's information in the app's own colours (light or dark as set): its histogram
+     * first, the shot, then the develop's record by section. Portrait: a sheet from the foot;
+     * landscape: a column on the right, beside the tools.
+     */
+    private fun openInfo(animate: Boolean) {
         val e = current() ?: return
-        val text = buildString {
-            appendLine(e.name)
-            appendLine(if (e.kind == Library.PRINT) "成片 · ${e.width}×${e.height}" else "原片 · ${e.mime}")
-            e.recipe?.let { appendLine("配方：" + runCatching { Recipe.fromJson(it).summary() }.getOrDefault("")) }
-            if (e.meta.isNotEmpty()) {
-                appendLine()
-                appendLine("【拍摄】")
-                val m = e.meta
-                listOfNotNull(
-                    m["make"]?.let { "${it} ${m["model"] ?: ""}" },
-                    m["lens"]?.takeIf { it.isNotBlank() },
-                    listOfNotNull(
-                        m["aperture"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { "f/%.1f".format(it) },
-                        m["shutter"]?.toDoubleOrNull()?.takeIf { it > 0 }?.let { if (it >= 0.3) "%.1f s".format(it) else "1/${Math.round(1 / it)} s" },
-                        m["iso"]?.let { "ISO $it" },
-                        m["focal"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { "%.0f mm".format(it) },
-                    ).joinToString(" · ").ifEmpty { null },
-                ).forEach { appendLine(it) }
+        sheet?.let { root.removeView(it) }
+        val scrim = FrameLayout(this).apply {
+            setBackgroundColor(0x55000000)
+            setOnClickListener { closeInfo() }
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true // taps inside do not close it
+            background = rounded(Ui.SURFACE, dp(20).toFloat(), 1, Ui.LINE)
+            elevation = dp(12).toFloat()
+            setPadding(dp(16), dp(10), dp(10), dp(6))
+        }
+        // the head: what it is, copy, close
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(label("照片信息", Ui.HEADLINE, Ui.TEXT, bold = true).single(),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(iconButton(Glyph.COPY, Ui.ACCENT, 38, filled = false, description = "复制全部信息") { copy("照片信息", recordText(e)) })
+        head.addView(iconButton(Glyph.CLOSE, Ui.SUB, 38, filled = false, description = "关闭") { closeInfo() })
+        panel.addView(head, matchWrap())
+
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(6), dp(12)) }
+        // the histogram, and how much is clipped at each end
+        histogram = HistogramView(this)
+        body.addView(histogram, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (wide) 120 else 110)).apply { topMargin = dp(4) })
+        clipLine = label("", Ui.CAPTION, Ui.SUB).apply { setPadding(dp(2), dp(6), 0, 0) }
+        body.addView(clipLine)
+        refreshHistogram()
+
+        // what and when
+        val recipe = e.recipe?.let { runCatching { Recipe.fromJson(it).summary() }.getOrNull() }
+        body.addView(label(recipe ?: e.name, Ui.BODY, Ui.TEXT, bold = true).apply { setPadding(0, dp(14), 0, 0) })
+        val time = (e.shotTime.takeIf { it > 0 } ?: e.time).let { SimpleDateFormat("yyyy年M月d日 HH:mm", Locale.CHINA).format(Date(it)) }
+        val size = if (e.width > 0 && e.height > 0) "${e.width}×${e.height}（%.1f MP）".format(e.width * e.height / 1e6) else null
+        body.addView(label(listOfNotNull(if (recipe != null) e.name else null, size, time).joinToString("  ·  "), Ui.FOOTNOTE, Ui.SUB)
+            .apply { setPadding(0, dp(2), 0, 0) })
+
+        // the shot: four cells, then the camera and the lens
+        val m = e.meta
+        val cells = listOf(
+            "光圈" to m["aperture"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { "f/" + "%.1f".format(it).removeSuffix(".0") },
+            "快门" to m["shutter"]?.toDoubleOrNull()?.takeIf { it > 0 }?.let { if (it >= 0.3) "%.1f″".format(it).replace(".0″", "″") else "1/${Math.round(1 / it)}" },
+            "ISO" to m["iso"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { it.toInt().toString() },
+            "焦距" to m["focal"]?.toFloatOrNull()?.takeIf { it > 0 }?.let { "%.0fmm".format(it) },
+        )
+        if (cells.any { it.second != null }) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0) }
+            cells.forEachIndexed { i, (name, value) ->
+                row.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    background = rounded(Ui.SURFACE2, dp(12).toFloat())
+                    setPadding(dp(2), dp(8), dp(2), dp(8))
+                    addView(label(value ?: "—", Ui.SUBHEAD, if (value != null) Ui.TEXT else Ui.DIM, bold = true).single().apply {
+                        typeface = Ui.mono; gravity = Gravity.CENTER
+                    })
+                    addView(label(name, Ui.CAPTION, Ui.SUB).single().apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(6) })
             }
-            if (e.note.isNotBlank()) {
-                var section = ""
-                for (line in e.note.lines()) {
-                    val parts = line.split('\t')
-                    if (parts.size < 3) continue
-                    if (parts[0] != section) {
-                        section = parts[0]
-                        appendLine()
-                        appendLine("【$section】")
-                    }
-                    appendLine("${parts[1]}：${parts[2]}")
-                }
+            body.addView(row, matchWrap())
+        }
+        val shot = shotLines(e)
+        if (shot.isNotEmpty()) body.addView(infoGroup(null, shot.mapIndexed { i, v -> (if (i == 0) "相机" else "镜头") to v }))
+        if (e.kind == Library.ORIGINAL) body.addView(infoGroup(null, listOf("文件" to e.mime)))
+        if (e.meta["lossless"] != null) body.addView(infoGroup(null, listOf("无损母版" to "16 位 TIFF（与 JPEG 存在同一文件夹）")))
+        // the develop's record, a group per section
+        for ((section, rows) in record(e)) body.addView(infoGroup(section, rows))
+
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(body) }
+        panel.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        val screenH = resources.displayMetrics.heightPixels
+        val lp = if (wide) FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.40f).toInt(),
+            ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply { setMargins(0, dp(10), dp(68 + 10), dp(10)) }
+        else FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (screenH * 0.68f).toInt(), Gravity.BOTTOM)
+            .apply { setMargins(dp(8), 0, dp(8), dp(8)) }
+        scrim.addView(panel, lp)
+        root.addView(scrim, frameMatch())
+        sheet = scrim
+        if (animate && !Ease.reduced(this)) {
+            scrim.alpha = 0f
+            scrim.animate().alpha(1f).setDuration(180).start()
+            if (wide) panel.translationX = dp(40).toFloat() else panel.translationY = dp(60).toFloat()
+            panel.animate().translationX(0f).translationY(0f).setDuration(260).setInterpolator(Ease.out).start()
+        }
+        // back closes the panel first
+        if (backCallback == null && android.os.Build.VERSION.SDK_INT >= 33) {
+            val cb = android.window.OnBackInvokedCallback { closeInfo() }
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, cb)
+            backCallback = cb
+        }
+    }
+
+    /** A titled group of label / value rows, the values selectable. */
+    private fun infoGroup(title: String?, rows: List<Pair<String, String>>): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(0, dp(14), 0, 0)
+        if (title != null) addView(label(title, Ui.FOOTNOTE, Ui.ACCENT, bold = true).apply { setPadding(dp(2), 0, 0, dp(6)) })
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Ui.SURFACE2, dp(12).toFloat())
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        rows.forEachIndexed { i, (k, v) ->
+            if (i > 0) card.addView(View(context).apply { setBackgroundColor(Ui.LINE) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+            card.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(7), 0, dp(7))
+                addView(label(k, Ui.FOOTNOTE, Ui.SUB), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.42f))
+                addView(label(v, Ui.FOOTNOTE, Ui.TEXT).apply { gravity = Gravity.END; setTextIsSelectable(true) },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.58f).apply { marginStart = dp(8) })
+            })
+        }
+        addView(card, matchWrap())
+    }
+
+    private fun refreshHistogram() {
+        val view = histogram ?: return
+        val line = clipLine ?: return
+        val bmp = shown
+        val e = current()
+        if (bmp == null) { view.data = null; line.text = "载入中…"; return }
+        val what = if (e?.kind == Library.ORIGINAL) "相机内嵌 JPEG 的直方图" else "成片直方图"
+        loader.execute {
+            val h = runCatching { HistogramView.measure(bmp) }.getOrNull()
+            runOnUiThread {
+                if (histogram !== view || h == null) return@runOnUiThread
+                view.data = h
+                line.text = "$what　·　暗部裁切 %.1f%%　·　高光裁切 %.1f%%".format(h.dark * 100, h.bright * 100)
             }
         }
-        val view = TextView(this).apply {
-            this.text = text
-            textSize = 12f
-            typeface = Typeface.MONOSPACE
-            setTextColor(Ui.TEXT)
-            setTextIsSelectable(true)
-            setPadding(dp(18), dp(12), dp(18), dp(12))
+    }
+
+    private fun closeInfo() {
+        val s = sheet ?: return
+        sheet = null
+        histogram = null
+        clipLine = null
+        if (android.os.Build.VERSION.SDK_INT >= 33) (backCallback as? android.window.OnBackInvokedCallback)?.let {
+            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it)
         }
-        AlertDialog.Builder(this).setTitle("照片档案").setView(ScrollView(this).apply { addView(view) })
-            .setPositiveButton("关闭", null).show()
+        backCallback = null
+        if (Ease.reduced(this)) { root.removeView(s); return }
+        s.animate().alpha(0f).setDuration(160).withEndAction { root.removeView(s) }.start()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (sheet != null) closeInfo() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     private fun share() {

@@ -126,6 +126,9 @@ class ObjectInfo(
         val RAW_EXTENSIONS = setOf(
             "NEF", "NRW", "CR2", "CR3", "CRW", "ARW", "SRF", "SR2", "RAF", "ORF", "ORI", "RW2", "RWL", "PEF",
             "SRW", "X3F", "3FR", "FFF", "IIQ", "MRW", "DCR", "KDC", "ERF", "MEF", "MOS", "GPR", "DNG",
+            // less common ones LibRaw also reads: Panasonic / Leica RAW, Sony pixel shift, Phase One,
+            // Mamiya, Kodak, Sinar, Casio
+            "RAW", "RWZ", "ARQ", "CAP", "EIP", "MFW", "K25", "KC2", "DC2", "DCS", "STI", "BAY", "MDC",
         )
         val VIDEO_EXTENSIONS = setOf("MOV", "MP4", "NEV", "AVI")
 

@@ -132,6 +132,18 @@ object Library {
         return uri
     }
 
+    /** Copies [file] into the prints' folder (a lossless TIFF beside its JPEG); returns its uri. */
+    fun saveFile(context: Context, file: File, name: String, mime: String): Uri {
+        val uri = runCatching {
+            insert(context, MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), name, mime, FOLDER)
+        }.getOrElse {
+            insert(context, MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), name, mime,
+                "Download/PhotoAll Tether")
+        }
+        write(context, uri, file)
+        return uri
+    }
+
     /** Copies an original (NEF, camera JPEG) into the phone's pictures; returns its uri. */
     fun saveOriginal(context: Context, file: File, name: String): Uri {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
@@ -208,6 +220,8 @@ object Library {
             val uri = Uri.parse(e.uri)
             try {
                 context.contentResolver.delete(uri, null, null)
+                // its lossless TIFF goes with it
+                e.meta["lossless"]?.let { t -> runCatching { context.contentResolver.delete(Uri.parse(t), null, null) } }
                 gone += e
             } catch (s: SecurityException) {
                 // a picture already deleted in the gallery has no row left: Android then refuses the

@@ -305,6 +305,9 @@ object CameraHub {
             val (p, di) = Vendors.prepare(c, device ?: info, brand, ::note)
             profile = p
             device = di
+            // Panasonic: the cards may open up once its own session is open (Vendors.prepare)
+            if (brand == Brand.PANASONIC && storages.isEmpty()) runCatching { refreshStorages() }
+                .onSuccess { note("松下：现在能读到 ${storages.size} 张存储卡") }
             note("品牌：${brand.label}；新照片：" + listOfNotNull(
                 if (p.pollsEvents) "轮询相机事件" else null,
                 if (p.interruptEvents) "USB 事件" else null,
@@ -771,7 +774,7 @@ object CameraHub {
         synchronized(arrivals) { arrivals += info.key }
         // the roll's frame counter: one frame per shot (a RAW+JPEG pair counts once, by its raw)
         if (info.isRaw) org.photoall.tether.develop.Roll.shot(app)
-        else if (info.isJpeg) main.postDelayed({
+        else if (info.isJpeg || info.isHeif) main.postDelayed({
             val now = items.firstOrNull { it.files.any { f -> f.handle == info.handle } }
             if (now == null || now.raw == null) org.photoall.tether.develop.Roll.shot(app)
         }, 2500)
@@ -779,7 +782,7 @@ object CameraHub {
         val item = items.firstOrNull { it.files.any { f -> f.handle == info.handle } } ?: CameraItem(listOf(info))
         // RAW+JPEG: develop once, from the raw (the JPEG of the pair arrives first or after it)
         if (info.isRaw) DevelopQueue.addCamera(app, item, develop = true, auto = true)
-        else if (info.isJpeg && Prefs.developJpeg(app)) main.postDelayed({
+        else if ((info.isJpeg || info.isHeif) && Prefs.developJpeg(app)) main.postDelayed({
             val now = items.firstOrNull { it.files.any { f -> f.handle == info.handle } }
             if (now != null && now.raw == null) DevelopQueue.addCamera(app, now, develop = true, auto = true)
         }, 2500)

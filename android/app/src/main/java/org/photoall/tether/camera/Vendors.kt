@@ -125,7 +125,7 @@ object Vendors {
                 runCatching { c.command(Ptp.SET_DEVICE_PROP_VALUE, FUJI_PRIORITY_MODE, dataOut = u16(1)) }
                     .onFailure { note("富士 PriorityMode：${it.message}") }
             }
-            Brand.PANASONIC -> if (MTP_SESSION_INITIATOR in info.properties) {
+            Brand.PANASONIC -> { if (MTP_SESSION_INITIATOR in info.properties) {
                 runCatching {
                     c.command(Ptp.SET_DEVICE_PROP_VALUE, MTP_SESSION_INITIATOR,
                         dataOut = ptpString("Windows/6.2.9200 MTPClassDriver/6.2.9200.16384"))
@@ -135,6 +135,8 @@ object Vendors {
             } else {
                 // as libgphoto2: only when the camera lists the property
                 note("松下：相机没有列出属性 0xD406（MTP 会话发起方），不做 Windows MTP 声明")
+            }
+                panasonicSession(c, info, note)
             }
             else -> {}
         }
@@ -163,6 +165,33 @@ object Vendors {
         )
         return profile to di
     }
+
+    /*
+     * Panasonic (seen on a DC-G100D, firmware 1.3, PID 0x2382): the camera lists GetStorageIDs,
+     * GetObjectInfo, GetObject, GetPartialObject ... yet answers every one of them with 0x2005
+     * (operation not supported), and lists its own 0x9102 / 0x9103 / 0x9104. libgphoto2 names
+     * 0x9102 Panasonic OpenSession ("1 arg, seems to be storage id 0x00010001") but never sends
+     * it. Untried guess: the standard operations open up once that session is open. Only tried
+     * when the camera refuses GetStorageIDs, and every step is logged.
+     */
+    private fun panasonicSession(c: PtpConnection, info: DeviceInfo, note: (String) -> Unit) {
+        if (!info.supports(PANASONIC_OPEN_SESSION)) return
+        val before = runCatching { c.transact(Ptp.GET_STORAGE_IDS).code }.getOrNull()
+        if (before != Ptp.OPERATION_NOT_SUPPORTED) return
+        for (param in intArrayOf(0x00010001, 0)) {
+            val r = runCatching { c.transact(PANASONIC_OPEN_SESSION, intArrayOf(param)) }
+            val answer = r.getOrNull()?.code
+            note("松下：标准操作被拒（GetStorageIDs 返回 0x2005），试松下 OpenSession 0x9102(0x%08X) → %s".format(param,
+                answer?.let { "0x%04X（${Ptp.responseName(it)}）".format(it) } ?: (r.exceptionOrNull()?.message ?: "?")))
+            val after = runCatching { c.transact(Ptp.GET_STORAGE_IDS).code }.getOrNull()
+            note("松下：之后 GetStorageIDs → %s".format(after?.let { "0x%04X（${Ptp.responseName(it)}）".format(it) } ?: "失败"))
+            if (after == Ptp.OK) return
+            if (answer == Ptp.OK) break // the session opened but changed nothing: no use trying more
+        }
+        note("松下：这个 USB 模式下相机不开放文件读取（标准操作都返回 0x2005），新拍的照片传不过来")
+    }
+
+    private const val PANASONIC_OPEN_SESSION = 0x9102
 
     /** One poll of the camera's own event queue (Nikon, Canon): (event code, object handle). */
     fun poll(c: PtpConnection, profile: Profile): List<Pair<Int, Int>> = when (profile.brand) {

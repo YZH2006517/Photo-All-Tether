@@ -27,6 +27,9 @@ import kotlin.random.Random
  * while the last one develops.
  */
 object DevelopQueue {
+    /** The immersive view's entrance frames: about its screen's size, light enough for eight of them. */
+    private const val REVEAL_EDGE = 1440
+
     enum class Status(val text: String) {
         WAITING("排队"), DOWNLOADING("传输"), DEVELOPING("冲洗"), DONE("完成"), FAILED("失败")
     }
@@ -44,6 +47,25 @@ object DevelopQueue {
         @Volatile var error: String? = null
         @Volatile var result: Library.Entry? = null
         @Volatile var thumb: Bitmap? = null
+        // for the immersive view's live readout: the file, its transfer, the develop
+        @Volatile var fileName: String? = null
+        @Volatile var bytes = 0L
+        @Volatile var totalBytes = 0L
+        @Volatile var transferStarted = 0L
+        @Volatile var transferEnded = 0L
+        /** How the file got here when it was not copied off the camera just now. */
+        @Volatile var transferNote: String? = null
+        @Volatile var developStarted = 0L
+        @Volatile var developEnded = 0L
+        @Volatile var created = System.currentTimeMillis()
+        /** The steps this shot goes through (the live readout's), and which one it is at. */
+        @Volatile var plan: List<String> = listOf("传输", "解码 RAW", "冲洗", "存储")
+        @Volatile var step = 0
+        @Volatile var stepStarted = System.currentTimeMillis()
+        fun at(name: String) {
+            val i = plan.indexOf(name)
+            if (i >= 0) { step = i; stepStarted = System.currentTimeMillis() }
+        }
         val finished: Boolean get() = status == Status.DONE || status == Status.FAILED
     }
 
@@ -132,6 +154,11 @@ object DevelopQueue {
         try {
             val info: ObjectInfo = item.raw ?: item.jpeg ?: throw IllegalStateException("没有可冲洗的照片文件（${item.badge}）")
             job.status = Status.DOWNLOADING
+            job.plan = listOf("传输") + (if (info.isRaw) listOf("解码 RAW") else emptyList()) + listOf("冲洗", "存储")
+            job.at("传输")
+            job.fileName = info.filename
+            job.totalBytes = info.size
+            job.transferStarted = System.currentTimeMillis()
             changed()
             // already on the phone: develop from that copy
             val existing = Library.originalOf(item.key)
@@ -139,14 +166,18 @@ object DevelopQueue {
             val cached = CameraHub.cachedOriginal(info)
             if (existing != null && runCatching { Library.copyToCache(app, Uri.parse(existing.uri), file.name) }.isSuccess) {
                 job.detail = "原片已在手机上"
+                job.transferNote = job.detail
             } else if (cached != null && runCatching { cached.copyTo(file, overwrite = true) }.isSuccess) {
                 // copied over already when its large preview was opened
                 job.detail = "原片已传到手机"
+                job.transferNote = job.detail
                 if (Prefs.keepOriginal(app) || !job.develop) saveOriginal(app, job, file, info)
             } else {
                 val started = System.currentTimeMillis()
                 file.outputStream().buffered(1 shl 20).use { out ->
                     CameraHub.download(info, out) { got, total ->
+                        job.bytes = got
+                        if (total > 0) job.totalBytes = total
                         job.progress = if (total > 0) got.toFloat() / total else 0f
                         job.detail = "%.1f / %.1f MB".format(got / 1048576.0, total / 1048576.0)
                         changed(force = false)
@@ -159,6 +190,8 @@ object DevelopQueue {
                 if (Prefs.keepOriginal(app) || !job.develop) saveOriginal(app, job, file, info)
             }
             job.progress = 1f
+            job.bytes = job.totalBytes
+            job.transferEnded = System.currentTimeMillis()
             if (!job.develop) {
                 file.delete()
                 job.status = Status.DONE
@@ -204,9 +237,10 @@ object DevelopQueue {
     }
 
     /**
-     * Develops [file]. A raw this app cannot decode (Nikon High Efficiency, a body LibRaw does not
-     * know yet) is developed from [jpegFallback] instead when that gives a file (the JPEG of a
-     * RAW+JPEG shot), so the shot is not lost; the reason is kept in the job and the log.
+     * Develops [file]. A raw this app cannot decode (Nikon High Efficiency, a body or compression
+     * LibRaw does not know yet) is developed from [jpegFallback] instead when that gives a file
+     * (the JPEG of a RAW+JPEG shot), else from the full-size JPEG the raw carries inside, so the
+     * shot is not lost; the reason is kept in the job and the log.
      */
     private fun develop(app: Context, job: Job, file: File, cameraKey: String?, original: Library.Entry?,
                         jpegFallback: (() -> File?)? = null) {
@@ -214,6 +248,8 @@ object DevelopQueue {
         try {
             job.status = Status.DEVELOPING
             job.progress = 0f
+            job.developStarted = System.currentTimeMillis()
+            if (job.fileName == null) job.fileName = file.name
             job.detail = "启动 GPU"
             changed()
             val engine = FilmEngine.get(app)
@@ -226,22 +262,37 @@ object DevelopQueue {
             var meta: Map<String, String> = emptyMap()
             var source = file
             var rawProblem: String? = null
+            var fallbackWhat = "JPEG"          // what was developed instead of the raw
+            var orientationFrom: File? = null  // an embedded JPEG: the raw's own EXIF turns it upright
+            var reveal: List<Reveal.Frame> = emptyList() // the immersive view's entrance, rendered by the engine
             if (ext in ObjectInfo.RAW_EXTENSIONS) {
                 job.detail = "解码 RAW"
+                job.at("解码 RAW")
                 changed()
                 val key = RawFile.embeddedJpeg(file.path)?.let { Brightness.key(it) } ?: 0f
                 val raw = try {
                     RawFile.open(file.path, longEdge)
                 } catch (e: Exception) {
                     // RAW+JPEG: develop the JPEG of the pair rather than fail the shot
-                    val get = jpegFallback ?: throw e
-                    job.detail = "RAW 解不了，取同一张的 JPEG"
-                    changed()
-                    val jpeg = runCatching { get() }
-                        .onFailure { CameraHub.note("${job.title}：取同一张的 JPEG 失败：${it.message}") }
-                        .getOrNull() ?: throw e
+                    var jpeg: File? = null
+                    if (jpegFallback != null) {
+                        job.detail = "RAW 解不了，取同一张的 JPEG"
+                        changed()
+                        jpeg = runCatching { jpegFallback() }
+                            .onFailure { CameraHub.note("${job.title}：取同一张的 JPEG 失败：${it.message}") }
+                            .getOrNull()
+                    }
+                    // otherwise the full-size JPEG inside the raw (a NEF, CR3, ARW ... carries one)
+                    if (jpeg == null) {
+                        jpeg = embeddedFallback(app, file)
+                        if (jpeg != null) {
+                            orientationFrom = file
+                            fallbackWhat = "RAW 内嵌 JPEG"
+                        }
+                    }
+                    if (jpeg == null) throw e
                     rawProblem = e.message ?: e.toString()
-                    CameraHub.note("${job.title}：$rawProblem；改用 ${jpeg.name} 冲洗")
+                    CameraHub.note("${job.title}：$rawProblem；改用 ${if (orientationFrom != null) "RAW 内嵌的 JPEG" else jpeg.name} 冲洗")
                     fallbackFile = jpeg
                     source = jpeg
                     null
@@ -249,43 +300,74 @@ object DevelopQueue {
                 if (raw != null) {
                     raw.use {
                         meta = it.meta
-                        job.detail = "冲洗"
+                        // the immersive view is open: the engine's steps first, each shown there as it
+                        // is rendered (the live darkroom), then the print at full size
+                        if (Reveal.wanted) {
+                            val steps = Reveal.plan(recipe)
+                            job.plan = job.plan.takeWhile { s -> s != "冲洗" } + steps + listOf("全尺寸冲洗", "存储")
+                            reveal = runCatching {
+                                Reveal.render(engine, it, recipe, key, seed, app, REVEAL_EDGE, Prefs.displayP3(app), job.id) { step ->
+                                    job.detail = step
+                                    job.at(step)
+                                    changed(force = false)
+                                }
+                            }.onFailure { e -> CameraHub.note("${job.title}：显影动画未生成：${e.message}") }.getOrDefault(emptyList())
+                        } else job.plan = job.plan.map { s -> if (s == "冲洗") "全尺寸冲洗" else s }
+                        job.detail = "全尺寸冲洗"
+                        job.at("全尺寸冲洗")
                         changed()
-                        done = engine.developRaw(it, recipe, longEdge, key, seed, app)
+                        done = engine.developRaw(it, recipe, longEdge, key, seed, app, Prefs.displayP3(app), tiffFor(app, job, recipe, meta))
                     }
                     Preview.offer(app, file)
                 }
             }
             if (done == null) {
                 job.detail = "冲洗 JPEG"
+                job.at("冲洗")
                 changed()
-                val bitmap = decodeJpeg(source, longEdge) ?: throw IllegalStateException("无法读取 ${source.name}")
-                meta = jpegMeta(source)
-                done = engine.developBitmap(bitmap, recipe, longEdge, seed, app)
+                val bitmap = decodeJpeg(source, longEdge, orientationFrom) ?: throw IllegalStateException("无法读取 ${source.name}")
+                meta = jpegMeta(orientationFrom ?: source)
+                done = engine.developBitmap(bitmap, recipe, longEdge, seed, app, Prefs.displayP3(app), tiffFor(app, job, recipe, meta))
                 bitmap.recycle()
             }
             val developed = done!!
             job.detail = "存储"
+            job.at("存储")
             changed()
             val name = "${job.title}_${safe(Films.short(recipe.film)).replace(" ", "")}.jpg".takeIf { recipe.filmOn }
                 ?: "${job.title}_print.jpg"
             val summary = recipe.summary()
             val uri = Library.saveJpeg(app, developed.bitmap, name, Prefs.jpegQuality(app), Library.exifFor(meta, summary))
+            // the lossless master beside it (16-bit TIFF), when asked for
+            val tiff = tiffFile(app, job)
+            if (Prefs.lossless(app) && !tiff.exists()) CameraHub.note("${job.title}：无损 TIFF 没生成")
+            if (tiff.exists()) {
+                job.detail = "存储无损 TIFF"
+                changed()
+                runCatching { Library.saveFile(app, tiff, name.substringBeforeLast('.') + ".tif", "image/tiff") }
+                    .onSuccess { meta = meta + ("lossless" to it.toString()) }
+                    .onFailure { CameraHub.note("${job.title}：无损 TIFF 没存上：${it.message}") }
+                tiff.delete()
+            }
             val entry = Library.Entry(
                 Library.nextId(), Library.PRINT, uri.toString(), name, "image/jpeg", cameraKey, original?.uri,
                 System.currentTimeMillis(), meta["time"]?.toLongOrNull()?.times(1000) ?: 0L,
                 developed.bitmap.width, developed.bitmap.height, recipe.toJson(), meta,
-                developed.note + (rawProblem?.let { "冲洗结果\t来源\tJPEG（RAW 解不了：$it）\n" } ?: "") +
+                developed.note + (rawProblem?.let { "冲洗结果\t来源\t$fallbackWhat（RAW 解不了：$it）\n" } ?: "") +
                     "冲洗结果\t总用时\t%.1f 秒\n".format((System.currentTimeMillis() - started) / 1000.0),
             )
+            Reveal.offer(uri.toString(), reveal) // before the library tells the immersive view
+            // the raw just handed to the recipe preview is this print's (the tuning bench uses it)
+            if (source == file && ext in ObjectInfo.RAW_EXTENSIONS) Preview.latestPrint = uri.toString()
             Library.add(app, entry)
             job.thumb = Bitmap.createScaledBitmap(developed.bitmap, 240, 240 * developed.bitmap.height / developed.bitmap.width, true)
             developed.bitmap.recycle()
             job.result = entry
+            job.developEnded = System.currentTimeMillis()
             job.status = Status.DONE
             job.progress = 1f
             job.detail = "%.1f 秒 · %s".format((System.currentTimeMillis() - started) / 1000.0, summary) +
-                (if (rawProblem != null) " · 用 JPEG 冲洗（RAW 不支持）" else "")
+                (if (rawProblem != null) " · 用 $fallbackWhat 冲洗（RAW 不支持）" else "")
             developedThisSession++
             CameraHub.note("冲洗 ${job.title}：${job.detail}")
             changed()
@@ -298,7 +380,33 @@ object DevelopQueue {
         }
     }
 
-    private fun decodeJpeg(file: File, longEdge: Int): Bitmap? {
+    /**
+     * The largest JPEG inside [raw], written to the work folder, when it is large enough to make a
+     * print of (1500 px on the long edge); null otherwise.
+     */
+    private fun embeddedFallback(app: Context, raw: File): File? {
+        val bytes = RawFile.embeddedJpeg(raw.path) ?: return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (maxOf(bounds.outWidth, bounds.outHeight) < 1500) return null
+        return File(File(app.cacheDir, "work").apply { mkdirs() }, raw.nameWithoutExtension + "_embedded.jpg")
+            .apply { writeBytes(bytes) }
+    }
+
+    private fun tiffFile(app: Context, job: Job) = File(File(app.cacheDir, "work").apply { mkdirs() }, "lossless_${job.id}.tif")
+
+    /** The 16-bit TIFF to write with this develop (the lossless master), when the setting asks for one. */
+    private fun tiffFor(app: Context, job: Job, recipe: Recipe, meta: Map<String, String>): org.photoall.tether.engine.TiffRequest? {
+        if (!Prefs.lossless(app)) return null
+        val time = meta["time"]?.toLongOrNull()?.takeIf { it > 0 }?.let {
+            java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(java.util.Date(it * 1000))
+        } ?: ""
+        return org.photoall.tether.engine.TiffRequest(tiffFile(app, job).path, meta["make"] ?: "", meta["model"] ?: "",
+            "Photo All 联机 · " + recipe.summary(), time)
+    }
+
+    /** [orientationFrom]: the file whose EXIF orientation applies when the JPEG has none of its own (a raw's preview). */
+    private fun decodeJpeg(file: File, longEdge: Int, orientationFrom: File? = null): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         var sample = 1
@@ -308,11 +416,13 @@ object DevelopQueue {
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }) ?: return null
         // upright from the EXIF orientation
-        val degrees = runCatching {
-            when (android.media.ExifInterface(file.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)) {
-                6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f
-            }
-        }.getOrDefault(0f)
+        fun orientation(f: File) = runCatching {
+            android.media.ExifInterface(f.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)
+        }.getOrDefault(1)
+        val own = orientation(file)
+        val degrees = when (if (own == 1 && orientationFrom != null) orientation(orientationFrom) else own) {
+            6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f
+        }
         if (degrees == 0f) return bitmap
         val turned = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height,
             android.graphics.Matrix().apply { postRotate(degrees) }, true)

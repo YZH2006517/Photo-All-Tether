@@ -71,6 +71,8 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
     init {
         setBackgroundColor(Ui.BG)
         heading.addView(ctx.largeTitle("配方"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        heading.addView(ctx.button("调参台", glyph = Glyph.SLIDERS) { TuneActivity.open(ctx) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
         heading.addView(ctx.iconButton(Glyph.REFRESH, Ui.SUB, 40, description = "恢复默认配方") {
             AlertDialog.Builder(ctx).setMessage("恢复默认配方？")
                 .setPositiveButton("恢复") { _, _ -> update(rebuild = true) { Recipe() } }
@@ -262,146 +264,16 @@ class RecipePage(private val activity: MainActivity) : FrameLayout(activity), Ar
 
     // ---- the controls ----------------------------------------------------------------------------
 
+    // made on first use, not as a field initialiser: the page's init (above) builds it already,
+    // before the initialisers down here have run
+    private var controlsMade: RecipeControls? = null
+    private val controls: RecipeControls
+        get() = controlsMade ?: RecipeControls(ctx, { recipe }, { rebuild, change -> update(rebuild, change) }, { pickLut() })
+            .also { controlsMade = it }
+
     private fun build() {
-        dynamic.removeAllViews()
-        val r = recipe
-        summary.text = r.summary()
-
-        // film and paper
-        dynamic.addView(ctx.section("胶片与相纸"))
-        val stock = ctx.card()
-        stock.addView(ctx.toggleRow("胶片模拟", null, r.filmOn, Glyph.FILM, Ui.ACCENT) { on -> update(rebuild = true) { it.copy(filmOn = on) } })
-        if (r.filmOn) {
-            stock.addView(ctx.separator(42))
-            stock.addView(ctx.toggleRow("印放到相纸", null, r.printOn, Glyph.PHOTO, Ui.INDIGO) { on -> update(rebuild = true) { it.copy(printOn = on) } })
-            stock.addView(ctx.separator(42))
-            stock.addView(ctx.listRow("放大机滤色", null, Glyph.CONTRAST, Ui.TEAL))
-            stock.addView(Segmented(ctx, Recipe.balanceNames.map { it.removePrefix("保留") }, r.balance.coerceIn(0, 2)) { i ->
-                update(rebuild = true) { it.copy(balance = i) }
-            }, matchWrap().apply { bottomMargin = dp(8) })
-        }
-        dynamic.addView(stock, matchWrap())
-
-        // the look
-        dynamic.addView(ctx.section("风格"))
-        val look = ctx.card()
-        look.addView(ctx.listRow(if (r.lut == null) "无 LUT" else LutCatalog.label(r.lut), null, Glyph.SPARKLES, Ui.PURPLE) { pickLut() })
-        if (r.lut != null) {
-            look.addView(ctx.sliderRow("强度", 0f, 1f, r.lutStrength, 0.05f, { "%.0f%%".format(it * 100) }, indent = true) { v -> update { it.copy(lutStrength = v) } })
-            look.addView(ctx.separator(42))
-            look.addView(ctx.toggleRow("使用 LUT", null, r.lutOn, Glyph.CHECK_CIRCLE, Ui.GREEN) { on -> update { it.copy(lutOn = on) } })
-        }
-        dynamic.addView(look, matchWrap())
-
-        // light
-        dynamic.addView(ctx.section("曝光与白平衡"))
-        val light = ctx.card()
-        light.addView(ctx.sliderRow("曝光", -3f, 3f, r.ev, 1f / 3f, { "%+.1f".format(it) }, default = 0f, glyph = Glyph.EV, tint = Ui.ACCENT) { v ->
-            update { it.copy(ev = v) }
-        })
-        light.addView(ctx.separator(42))
-        light.addView(ctx.toggleRow("对齐相机亮度", null, r.matchCamera, Glyph.CAMERA, Ui.BLUE) { on -> update { it.copy(matchCamera = on) } })
-        light.addView(ctx.separator(42))
-        light.addView(Segmented(ctx, Recipe.whiteNames, r.white) { i -> update(rebuild = true) { it.copy(white = i) } },
-            matchWrap().apply { topMargin = dp(10); bottomMargin = dp(6) })
-        if (r.white == Recipe.WHITE_KELVIN)
-            light.addView(ctx.sliderRow("色温", 2500f, 10000f, r.kelvin, 50f, { "%.0f K".format(it) }, default = 5500f, glyph = Glyph.THERMO, tint = Ui.PINK) { v ->
-                update { it.copy(kelvin = v) }
-            })
-        if (r.white != Recipe.WHITE_CAMERA)
-            light.addView(ctx.sliderRow("色调", -1f, 1f, r.tint, 0.05f, { "%+.2f".format(it) }, default = 0f, indent = r.white == Recipe.WHITE_KELVIN) { v -> update { it.copy(tint = v) } })
-        dynamic.addView(light, matchWrap())
-
-        // texture
-        dynamic.addView(ctx.section("质感"))
-        val tex = ctx.card()
-        tex.addView(ctx.toggleRow("颗粒", null, r.grain, Glyph.GRAIN, Ui.GREY) { on -> update(rebuild = true) { it.copy(grain = on) } })
-        if (r.grain) tex.addView(ctx.sliderRow("大小", 0.2f, 2.5f, r.grainSize, 0.05f, default = 1f, indent = true) { v -> update { it.copy(grainSize = v) } })
-        tex.addView(ctx.separator(42))
-        tex.addView(ctx.toggleRow("光晕", null, r.halation, Glyph.HALO, Ui.RED) { on -> update(rebuild = true) { it.copy(halation = on) } })
-        if (r.halation) tex.addView(ctx.sliderRow("强度", 0f, 4f, r.halationAmount, 0.1f, default = 1f, indent = true) { v -> update { it.copy(halationAmount = v) } })
-        tex.addView(ctx.separator(42))
-        tex.addView(ctx.toggleRow("DIR 耦合剂", null, r.couplers, Glyph.CONTRAST, Ui.TEAL) { on -> update { it.copy(couplers = on) } })
-        dynamic.addView(tex, matchWrap())
-
-        // noise
-        dynamic.addView(ctx.section("降噪"))
-        val noise = ctx.card()
-        noise.addView(ctx.sliderRow("RAW", 0f, 0.6f, r.rawDenoise, 0.05f, { if (it == 0f) "关" else "%.2f".format(it) }, glyph = Glyph.WAVE, tint = Ui.BLUE) { v ->
-            update { it.copy(rawDenoise = v) }
-        })
-        noise.addView(ctx.separator(42))
-        noise.addView(ctx.sliderRow("彩色", 0f, 1f, r.chromaDenoise, 0.05f, { if (it == 0f) "关" else "%.2f".format(it) }, glyph = Glyph.SPARKLES, tint = Ui.PURPLE) { v ->
-            update { it.copy(chromaDenoise = v) }
-        })
-        dynamic.addView(noise, matchWrap())
-
-        // everything else the engine has
-        dynamic.addView(ctx.section("高级参数"))
-        for (group in FilmParamsCatalog.groups) dynamic.addView(advancedGroup(group), matchWrap().apply { bottomMargin = dp(8) })
-    }
-
-    /** One folded group of advanced parameters: a header (with what changed) and its sliders. */
-    private fun advancedGroup(group: FilmParamsCatalog.Group): View {
-        val box = ctx.card()
-        val header = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(44)
-        }
-        val chevron = IconView(ctx, Glyph.CHEVRON_RIGHT, Ui.SUB, 16)
-        val changedBadge = ctx.label("", Ui.CAPTION, Ui.ON_ACCENT, bold = true).apply {
-            background = rounded(Ui.ACCENT, dp(9).toFloat())
-            setPadding(dp(7), dp(2), dp(7), dp(2))
-        }
-        val reset = ctx.iconButton(Glyph.REFRESH, Ui.ACCENT, 34, filled = false, description = "恢复本组默认") {}
-        header.addView(ctx.label(group.title, Ui.BODY), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        header.addView(changedBadge)
-        header.addView(reset, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(6) })
-        header.addView(chevron, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginStart = dp(6) })
-        box.addView(header, matchWrap())
-        val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(body, matchWrap())
-
-        fun refreshHeader() {
-            val n = recipe.changed(group)
-            changedBadge.text = n.toString()
-            changedBadge.visibility = if (n > 0) View.VISIBLE else View.GONE
-            reset.visibility = if (n > 0) View.VISIBLE else View.GONE
-            chevron.animate().rotation(if (group.id in expanded) 90f else 0f).setDuration(260).setInterpolator(Ease.spring).start()
-        }
-        fun fill() {
-            body.removeAllViews()
-            if (group.id !in expanded) return
-            for (prm in group.params) {
-                val v = recipe.value(prm.key)
-                val row = if (prm.toggle) ctx.toggleRow(prm.label, null, v >= 0.5f) { on ->
-                    update { it.withParam(prm.key, if (on) 1f else 0f) }
-                    refreshHeader()
-                } else ctx.sliderRow(prm.label, prm.min, prm.max, v, prm.step, prm.format, default = prm.default) { nv ->
-                    update { it.withParam(prm.key, nv) }
-                    refreshHeader()
-                }
-                body.addView(row)
-                row.rise(body.childCount * 25L, 8)
-            }
-        }
-        header.setOnClickListener {
-            Haptic.tick(this)
-            if (!expanded.remove(group.id)) expanded += group.id
-            refreshHeader()
-            fill()
-        }
-        reset.setOnClickListener {
-            Haptic.confirm(this)
-            update { it.copy(extra = it.extra - group.params.map { prm -> prm.key }.toSet()) }
-            refreshHeader()
-            fill()
-        }
-        chevron.rotation = if (group.id in expanded) 90f else 0f
-        refreshHeader()
-        fill()
-        return box
+        summary.text = recipe.summary()
+        controls.build(dynamic)
     }
 
     /** The LUT page: every LUT as a small print of the latest picture, import and manage. */

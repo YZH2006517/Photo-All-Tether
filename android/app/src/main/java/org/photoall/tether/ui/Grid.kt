@@ -27,16 +27,19 @@ class ThumbCell(context: Context) : SquareFrame(context) {
         scaleType = ImageView.ScaleType.CENTER_CROP
         setBackgroundColor(Ui.SURFACE)
     }
+    // on the picture itself, so the same in both themes: white on a dark pill (the theme's
+    // text colour turned it black on black in the light theme)
     val badge = TextView(context).apply {
-        textSize = 9f
-        setTextColor(Ui.TEXT)
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        background = rounded(0x99000000.toInt(), dp(4).toFloat())
-        setPadding(dp(4), dp(1), dp(4), dp(1))
+        textSize = 10f
+        setTextColor(android.graphics.Color.WHITE)
+        typeface = Ui.semibold
+        background = rounded(0xA6000000.toInt(), dp(5).toFloat())
+        setPadding(dp(5), dp(1), dp(5), dp(2))
+        setShadowLayer(dp(1).toFloat(), 0f, 0f, 0x66000000)
     }
     private val marks = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
     private val onPhone = IconView(context, Glyph.CHECK_CIRCLE, Ui.GREEN, 15)
-    private val locked = IconView(context, Glyph.LOCK, Ui.TEXT, 14)
+    private val locked = IconView(context, Glyph.LOCK, android.graphics.Color.WHITE, 14)
     private val check = IconView(context, Glyph.CIRCLE, android.graphics.Color.WHITE, 22)
     private var wasSelected = false
     private var scaleTarget = 1f

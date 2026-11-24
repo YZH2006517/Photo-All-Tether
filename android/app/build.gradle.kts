@@ -2,8 +2,9 @@ plugins {
     id("com.android.application")
 }
 
-// The phone app's repository (git submodule third_party/Photo-All-Android): the film engine's
-// sources and the film / LUT assets come from there. -Pphotoall.phone=<path> uses another checkout.
+// The phone app's repository (git submodule third_party/Photo-All-Android): the film / LUT
+// assets come from there (the film engine itself is built from ../engine, Photo All 0.3.0's).
+// -Pphotoall.phone=<path> uses another checkout.
 val phone: String = (findProperty("photoall.phone") as String?)
     ?: rootProject.file("../third_party/Photo-All-Android").invariantSeparatorsPath
 
@@ -16,12 +17,9 @@ android {
         applicationId = "org.photoall.tether"
         minSdk = 29
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.3"
+        versionCode = 7
+        versionName = "0.1.5"
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild {
-            cmake { arguments += "-DPHOTOALL_PHONE=$phone" }
-        }
     }
 
     externalNativeBuild {

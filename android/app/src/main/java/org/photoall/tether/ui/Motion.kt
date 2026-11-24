@@ -222,17 +222,20 @@ class RingProgress(context: Context) : View(context) {
 
     private fun ensure() {
         if (anim != null || !isAttachedToWindow) return
-        anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        // kept before it starts: start() runs the first frame at once, and that frame may already
+        // be the last (nothing to move), which must find this animator to let it go
+        val a = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 1000
             repeatCount = ValueAnimator.INFINITE
             addUpdateListener {
                 shown += (target - shown) * 0.18f
                 if (indeterminate) spin = (spin + 9f) % 360f
                 invalidate()
-                if (!indeterminate && kotlin.math.abs(target - shown) < 0.002f) { shown = target; cancel(); anim = null }
+                if (!indeterminate && kotlin.math.abs(target - shown) < 0.002f) { shown = target; cancel(); if (anim === this) anim = null }
             }
-            start()
         }
+        anim = a
+        a.start()
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); ensure() }

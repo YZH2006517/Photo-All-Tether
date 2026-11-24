@@ -18,7 +18,9 @@ fun Context.showText(title: String, text: String, scrollToEnd: Boolean = false, 
         this.text = text
         textSize = 11f
         typeface = Typeface.MONOSPACE
-        setTextColor(Ui.TEXT)
+        // the dialogs are always dark (AppDialog, #2C2C2E), whatever the app's theme: Ui.TEXT
+        // would be black in the light theme there
+        setTextColor(0xFFF2F2F7.toInt())
         setTextIsSelectable(true)
         setPadding(dp(16), dp(12), dp(16), dp(12))
     }

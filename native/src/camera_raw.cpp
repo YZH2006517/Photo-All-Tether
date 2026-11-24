@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 
@@ -129,6 +131,41 @@ void read_meta(LibRaw &lr, DecodedRaw &out)
       out.xyz_to_camera[c * 3 + j] = C.cam_xyz[c][j];
       out.has_matrix = out.has_matrix || C.cam_xyz[c][j] != 0.0f;
     }
+  if(!out.has_matrix && P.dng_version)
+  { // A DNG (Leica, Pentax, Ricoh, Sigma fp, Hasselblad, DJI, phones): LibRaw keeps its
+    // ColorMatrix apart. The one for D65 (illuminant 21), else the one not for tungsten (17);
+    // its CameraCalibration applied (CC x CM, as the DNG spec's XYZ-to-camera).
+    const libraw_dng_color_t *dc = C.dng_color;
+    auto filled = [](const libraw_dng_color_t &d) {
+      for(int c = 0; c < 3; c++)
+        for(int j = 0; j < 3; j++)
+          if(d.colormatrix[c][j] != 0.0f) return true;
+      return false;
+    };
+    int pick = -1;
+    for(int i = 0; i < 2; i++)
+      if(filled(dc[i]) && dc[i].illuminant == 21) pick = i;
+    for(int i = 0; i < 2 && pick < 0; i++)
+      if(filled(dc[i]) && dc[i].illuminant != 17) pick = i;
+    for(int i = 0; i < 2 && pick < 0; i++)
+      if(filled(dc[i])) pick = i;
+    if(pick >= 0)
+    {
+      const libraw_dng_color_t &d = dc[pick];
+      bool calibrated = false;
+      for(int c = 0; c < 3; c++)
+        for(int j = 0; j < 3; j++) calibrated = calibrated || d.calibration[c][j] != 0.0f;
+      for(int c = 0; c < 3; c++)
+        for(int j = 0; j < 3; j++)
+        {
+          double v = 0;
+          for(int k = 0; k < 3; k++)
+            v += (calibrated ? d.calibration[c][k] : (c == k ? 1.0 : 0.0)) * d.colormatrix[k][j];
+          out.xyz_to_camera[c * 3 + j] = v;
+        }
+      out.has_matrix = true;
+    }
+  }
   if(!neutral_from_multipliers(C.pre_mul, out.daylight_neutral))
     for(double &v : out.daylight_neutral) v = 1.0;
   if(!neutral_from_multipliers(C.cam_mul, out.as_shot_neutral))
@@ -210,8 +247,8 @@ bool generic_decode(LibRaw &lr, DecodedRaw &out, std::string &error, const Decod
 }
 
 // Nikon's High Efficiency raws (NEF compression 13 = HE, 14 = HE*, the TicoRAW codec of the Z 8,
-// Z 9, Z f, Z 6III ...) open (the makernotes are read) but LibRaw cannot decode the pixels: say
-// so in words the user can act on. Empty for every other file.
+// Z 9, Z f, Z 6III ...): LibRaw decodes them from its 202611 snapshot on; should one still fail
+// (a newer variant), say so in words the user can act on. Empty for every other file.
 std::string unsupported_reason(LibRaw &lr)
 {
   if(lr.imgdata.idata.maker_index != LIBRAW_CAMERAMAKER_Nikon) return {};
@@ -219,6 +256,53 @@ std::string unsupported_reason(LibRaw &lr)
   if(c != 13 && c != 14) return {};
   return std::string("尼康高效率 RAW（") + (c == 14 ? "HE★" : "HE") +
          "）暂不支持：请在相机菜单「RAW 压缩」里改成「无损压缩」";
+}
+
+// A body newer than this LibRaw's colour tables opens and decodes (its maker's format is
+// known) but has no colour matrix: LibRaw would render camera RGB as if it were sRGB (green,
+// flat). A recent model of the same maker stands in; sensors of one maker and generation are
+// close. The file's own black and white levels stay (the table would set the stand-in's).
+// Returns the stand-in's name, or empty (a DNG, a known model, a maker without one here).
+std::string borrow_matrix(LibRaw &lr, bool test = false)
+{
+  const libraw_colordata_t &C = lr.imgdata.color;
+  if(lr.imgdata.idata.dng_version && !test) return {}; // a DNG carries its own matrix
+  for(int c = 0; c < 3; c++)
+    for(int j = 0; j < 3; j++)
+      if(C.cam_xyz[c][j] != 0.0f) return {};
+  if(lr.imgdata.idata.colors != 3) return {}; // four-colour and Foveon sensors: LibRaw's own
+  struct Standin
+  {
+    unsigned maker, table_maker;
+    const char *model;
+  };
+  static const Standin kStandins[] = {
+      {LIBRAW_CAMERAMAKER_Nikon, LIBRAW_CAMERAMAKER_Nikon, "Z 8"},
+      {LIBRAW_CAMERAMAKER_Canon, LIBRAW_CAMERAMAKER_Canon, "EOS R6 Mark II"},
+      {LIBRAW_CAMERAMAKER_Sony, LIBRAW_CAMERAMAKER_Sony, "ILCE-7M4"},
+      {LIBRAW_CAMERAMAKER_Fujifilm, LIBRAW_CAMERAMAKER_Fujifilm, "X-T5"},
+      {LIBRAW_CAMERAMAKER_Panasonic, LIBRAW_CAMERAMAKER_Panasonic, "DC-S5M2"},
+      {LIBRAW_CAMERAMAKER_Leica, LIBRAW_CAMERAMAKER_Panasonic, "DC-S5M2"}, // L-mount siblings
+      {LIBRAW_CAMERAMAKER_Olympus, LIBRAW_CAMERAMAKER_Olympus, "OM-1"},
+      {LIBRAW_CAMERAMAKER_OmDigital, LIBRAW_CAMERAMAKER_Olympus, "OM-1"},
+      {LIBRAW_CAMERAMAKER_Pentax, LIBRAW_CAMERAMAKER_Pentax, "K-3 Mark III"},
+      {LIBRAW_CAMERAMAKER_Ricoh, LIBRAW_CAMERAMAKER_Pentax, "K-3 Mark III"},
+  };
+  const unsigned maker = lr.imgdata.idata.maker_index;
+  for(const Standin &s : kStandins)
+  {
+    if(s.maker != maker) continue;
+    libraw_colordata_t &W = lr.imgdata.color;
+    const unsigned black = W.black, maximum = W.maximum;
+    unsigned cblack[LIBRAW_CBLACK_SIZE];
+    std::memcpy(cblack, W.cblack, sizeof(cblack));
+    const int found = lr.adobe_coeff(s.table_maker, s.model, 0); // also sets rgb_cam for LibRaw's path
+    W.black = black;
+    W.maximum = maximum;
+    std::memcpy(W.cblack, cblack, sizeof(cblack));
+    if(found) return s.model;
+  }
+  return {};
 }
 
 bool fill_from(LibRaw &lr, int opened, DecodedRaw &out, std::string &error, const DecodeOptions &opts)
@@ -229,6 +313,13 @@ bool fill_from(LibRaw &lr, int opened, DecodedRaw &out, std::string &error, cons
     if(error.empty()) error = std::string("无法打开 RAW：") + libraw_strerror(opened);
     return false;
   }
+  const bool test = opts.test_unknown_maker >= 0;
+  if(test)
+  {
+    lr.imgdata.idata.maker_index = static_cast<unsigned>(opts.test_unknown_maker);
+    std::memset(lr.imgdata.color.cam_xyz, 0, sizeof(lr.imgdata.color.cam_xyz));
+  }
+  out.borrowed_matrix = borrow_matrix(lr, test);
   const int unpacked = lr.unpack();
   if(unpacked != LIBRAW_SUCCESS)
   {
@@ -293,16 +384,79 @@ bool fill_from(LibRaw &lr, int opened, DecodedRaw &out, std::string &error, cons
 
 } // namespace
 
+namespace {
+
+// A DNG LibRaw cannot decode (JPEG XL tiles: LibRaw reads those only through Adobe's DNG SDK),
+// through the film engine's own DNG reader (engine/src/dng.cpp, with libjxl); LibRaw still
+// gives the metadata when it can open the file. False (error set) for anything else.
+bool engine_dng(const uint8_t *data, size_t size, DecodedRaw &out, std::string &error, const DecodeOptions &opts)
+{
+  if(size < 8 || !((data[0] == 'I' && data[1] == 'I') || (data[0] == 'M' && data[1] == 'M'))) return false; // not TIFF
+  film::RawImage r;
+  if(!film::parse_dng(data, size, r, error, nullptr, opts.long_edge_hint)) return false;
+  out = DecodedRaw{}; // nothing left from LibRaw's failed attempt
+  auto lr = std::make_unique<LibRaw>();
+  if(lr->open_buffer(data, size) == LIBRAW_SUCCESS) read_meta(*lr, out);
+  out.raw = std::move(r);
+  out.bayer = true; // the engine takes it as it is (a mosaic, or linear RGB)
+  out.engine_dng = true;
+  out.rgb.clear();
+  out.meta.decoder = "Photo All DNG（LibRaw 不支持的压缩，如 JPEG XL）";
+  return true;
+}
+
+bool read_file(const std::string &path, std::vector<uint8_t> &bytes)
+{
+  FILE *f = std::fopen(path.c_str(), "rb");
+  if(!f) return false;
+  std::fseek(f, 0, SEEK_END);
+  const long n = std::ftell(f);
+  std::fseek(f, 0, SEEK_SET);
+  bytes.resize(n > 0 ? static_cast<size_t>(n) : 0);
+  const bool ok = n > 0 && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+  std::fclose(f);
+  return ok;
+}
+
+} // namespace
+
+// A .dng goes to the film engine's own DNG reader first (as the Photo All phone app reads
+// them): it applies the lens-shading GainMap LibRaw leaves out (a phone's corners stay dark
+// otherwise), reads linear DNGs at any size and their JPEG XL tiles, and the file's NoiseProfile.
+// LibRaw takes what it does not read (lossy JPEG, floating point, linearisation tables ...), and
+// every other format; a DNG LibRaw cannot read either goes back to the engine reader's error.
 bool decode_raw_file(const std::string &path, DecodedRaw &out, std::string &error, const DecodeOptions &opts)
 {
+  std::string ext = path.size() > 4 ? path.substr(path.size() - 4) : "";
+  for(char &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  const bool dng = ext == ".dng";
+  std::string dng_error;
+  if(dng || opts.test_engine_dng)
+  {
+    std::vector<uint8_t> bytes;
+    if(read_file(path, bytes) && engine_dng(bytes.data(), bytes.size(), out, dng_error, opts)) return true;
+    if(opts.test_engine_dng)
+    {
+      error = dng_error.empty() ? "DNG 读取失败" : dng_error;
+      return false;
+    }
+  }
   auto lr = std::make_unique<LibRaw>();
-  return fill_from(*lr, lr->open_file(path.c_str()), out, error, opts);
+  if(fill_from(*lr, lr->open_file(path.c_str()), out, error, opts)) return true;
+  if(!dng_error.empty()) error += "；DNG：" + dng_error;
+  return false;
 }
 
 bool decode_raw_buffer(const uint8_t *data, size_t size, DecodedRaw &out, std::string &error, const DecodeOptions &opts)
 {
-  auto lr = std::make_unique<LibRaw>();
-  return fill_from(*lr, lr->open_buffer(data, size), out, error, opts);
+  {
+    auto lr = std::make_unique<LibRaw>();
+    if(fill_from(*lr, lr->open_buffer(data, size), out, error, opts)) return true;
+  }
+  std::string dng_error;
+  if(engine_dng(data, size, out, dng_error, opts)) return true;
+  if(!dng_error.empty()) error += "；DNG：" + dng_error;
+  return false;
 }
 
 bool generic_pixels(const DecodedRaw &d, int max_long_edge, White white, float kelvin, float tint,
@@ -384,8 +538,28 @@ float rgba_key(const std::vector<float> &rgba, int width, int height)
   return static_cast<float>(std::exp(log_sum / weight_sum) - 1e-4);
 }
 
+float rgba_center_mean(const std::vector<float> &rgba, int width, int height)
+{
+  if(width <= 0 || height <= 0) return 0.0f;
+  const double longest = std::max(width, height);
+  double sum = 0.0, weights = 0.0;
+  for(int y = 0; y < height; y += 4)
+    for(int x = 0; x < width; x += 4)
+    {
+      const float *p = &rgba[(static_cast<size_t>(y) * width + x) * 4];
+      const double dx = (x + 0.5 - width / 2.0) / longest, dy = (y + 0.5 - height / 2.0) / longest;
+      const double w = std::exp(-(dx * dx + dy * dy) / (2 * 0.2 * 0.2));
+      sum += w * std::max(0.0, 0.2627 * p[0] + 0.6780 * p[1] + 0.0593 * p[2]);
+      weights += w;
+    }
+  return weights > 0 ? static_cast<float>(sum / weights) : 0.0f;
+}
+
 bool apply_white(DecodedRaw &d, White white, float kelvin, float tint, std::string &error)
 {
+  // the DNG reader set the file's own (as shot) white and matrix; a colour temperature goes
+  // through the DNG's ColorMatrix as LibRaw read it, as for any raw
+  if(d.engine_dng && (white == White::AsShot || !d.has_matrix)) return true;
   if(white == White::AsShot) return set_neutral(d, d.as_shot_neutral, error);
   double x, y;
   kelvin_xy(kelvin, x, y);
@@ -406,6 +580,7 @@ bool apply_white(DecodedRaw &d, White white, float kelvin, float tint, std::stri
 
 void estimate_noise(DecodedRaw &d)
 {
+  if(d.engine_dng && d.raw.noise_scale > 0) return; // the DNG's own NoiseProfile
   const double iso = std::clamp(d.meta.iso > 0 ? d.meta.iso : 100.0f, 50.0f, 204800.0f);
   const double full_well = 50000.0 * 100.0 / iso;      // electrons at white for this ISO
   const double read_e = iso >= 800.0 ? 1.4 : 3.2;      // dual conversion gain from ISO 800
@@ -418,7 +593,17 @@ std::vector<uint8_t> embedded_preview(const std::string &path, std::string &erro
   std::vector<uint8_t> jpeg;
   auto lr = std::make_unique<LibRaw>();
   int r = lr->open_file(path.c_str());
-  if(r == LIBRAW_SUCCESS) r = lr->unpack_thumb();
+  if(r == LIBRAW_SUCCESS)
+  { // the largest JPEG of the file's previews (LibRaw's own pick is not always the full-size one)
+    const libraw_thumbnail_list_t &list = lr->imgdata.thumbs_list;
+    int best = -1;
+    for(int i = 0; i < list.thumbcount && i < LIBRAW_THUMBNAIL_MAXCOUNT; i++)
+      if(list.thumblist[i].tformat == LIBRAW_INTERNAL_THUMBNAIL_JPEG &&
+         (best < 0 || int(list.thumblist[i].twidth) * list.thumblist[i].theight >
+                          int(list.thumblist[best].twidth) * list.thumblist[best].theight))
+        best = i;
+    r = best >= 0 ? lr->unpack_thumb_ex(best) : lr->unpack_thumb();
+  }
   if(r != LIBRAW_SUCCESS)
   {
     error = libraw_strerror(r);

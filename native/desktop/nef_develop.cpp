@@ -4,6 +4,7 @@
 //   nef_develop --assets <phone app assets> --in DSC_0001.NEF --out out.ppm
 //               [--long-edge 2048] [--ev 0] [--kelvin 5500] [--tint 0] [--denoise 0.3]
 //               [--set film=4] [--set paper=3] [--preview preview.jpg]
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -16,6 +17,7 @@
 
 #include "camera_raw.h"
 #include "film_engine.h"
+#include "tiff16.h"
 
 namespace {
 
@@ -50,7 +52,7 @@ bool write_ppm(const std::string &path, const film::DevelopResult &result)
 
 int main(int argc, char **argv)
 {
-  std::string assets, in_path, out_path, preview_path, error;
+  std::string assets, in_path, out_path, preview_path, tiff_path, error;
   film::FilmParams params;
   film::DevelopOptions options;
   options.max_long_edge = 2048;
@@ -70,13 +72,16 @@ int main(int argc, char **argv)
     if(arg == "--assets") assets = next();
     else if(arg == "--in") in_path = next();
     else if(arg == "--out") out_path = next();
+    else if(arg == "--tiff") { tiff_path = next(); options.output16 = true; } // 16-bit lossless master
     else if(arg == "--preview") preview_path = next();
     else if(arg == "--long-edge") options.max_long_edge = std::stoi(next());
     else if(arg == "--ev") options.exposure_ev = std::stof(next());
-    else if(arg == "--match-key") options.match_key = std::stof(next()); // the camera JPEG's key
+    else if(arg == "--match-key") options.match_key = std::stof(next()); // the camera JPEG's key; -1: the reference meter
     else if(arg == "--kelvin") kelvin = std::stof(next());
     else if(arg == "--tint") tint = std::stof(next());
     else if(arg == "--generic") decode_opts.force_generic = true; // the non-Bayer path, for testing
+    else if(arg == "--engine-dng") decode_opts.test_engine_dng = true; // the DNG fallback reader
+    else if(arg == "--unknown-maker") decode_opts.test_unknown_maker = std::stoi(next()); // stand-in matrix test
     else if(arg == "--denoise") options.raw_denoise = std::stof(next());
     else if(arg == "--chroma") options.chroma_denoise = std::stof(next());
     else if(arg == "--set")
@@ -141,6 +146,8 @@ int main(int argc, char **argv)
   std::printf("     wb %.3f %.3f %.3f (as shot neutral %.3f %.3f %.3f), orientation %d, decode %.0f ms\n", raw.wb[0],
               raw.wb[1], raw.wb[2], decoded.as_shot_neutral[0], decoded.as_shot_neutral[1], decoded.as_shot_neutral[2],
               raw.orientation, ms(t0, t1));
+  if(decoded.engine_dng) std::printf("     read by the engine's DNG reader (channels %d)\n", raw.channels);
+  if(!decoded.borrowed_matrix.empty()) std::printf("     matrix borrowed from %s\n", decoded.borrowed_matrix.c_str());
   if(decoded.bayer) std::printf("     key %.4f, noise %.3g %.3g\n", film::raw_key(raw), raw.noise_scale, raw.noise_offset);
 
   film::Lut filmsim, spectra;
@@ -175,6 +182,13 @@ int main(int argc, char **argv)
     source.space = film::ColourSpace::LinearRec2020;
     const float key = camraw::rgba_key(generic, gw, gh);
     if(options.match_key > 0 && key > 0) options.exposure_ev += std::log2(options.match_key / key);
+    if(options.match_key < 0)
+    { // the reference spektrafilm's meter, as the app's JNI does for non-Bayer raws
+      const float mean = camraw::rgba_center_mean(generic, gw, gh);
+      if(mean > 0) options.exposure_ev += std::max(0.0f, std::clamp(-std::log2(mean / 0.184f), -6.0f, 6.0f));
+      std::printf("generic: reference meter %.4f\n", mean);
+    }
+    options.match_key = 0;
     std::printf("generic: %s, %dx%d -> %dx%d, key %.4f\n", decoded.demosaic.c_str(), decoded.rgb_width,
                 decoded.rgb_height, gw, gh, key);
   }
@@ -185,6 +199,16 @@ int main(int argc, char **argv)
     return 1;
   }
   const auto t3 = std::chrono::steady_clock::now();
+  if(!tiff_path.empty())
+  {
+    tiff16::Meta meta{decoded.meta.make, decoded.meta.model, "nef_develop", "test", ""};
+    if(!tiff16::write(tiff_path, result.rgba16.data(), result.width, result.height, 1, false, meta, error))
+    {
+      std::cerr << "tiff: " << error << "\n";
+      return 1;
+    }
+    std::cout << "tiff: " << tiff_path << " (" << result.rgba16.size() / 4 << " px, 16 bit)\n";
+  }
   if(!write_ppm(out_path, result))
   {
     std::cerr << "cannot write " << out_path << "\n";

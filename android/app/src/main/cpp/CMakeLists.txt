@@ -3,10 +3,9 @@ project(tetherapp CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# The film engine as the phone app builds it, unchanged.
-set(PHOTOALL_PHONE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../third_party/Photo-All-Android" CACHE PATH
-    "Photo All Android repository (git submodule): its engine/ is built as is")
-add_subdirectory("${PHOTOALL_PHONE}/engine" "${CMAKE_CURRENT_BINARY_DIR}/engine")
+# The film engine (Photo All 0.3.0's, copied into engine/; see engine/README.md).
+set(FILMENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../engine" CACHE PATH "film engine sources")
+add_subdirectory("${FILMENGINE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/engine")
 # CPU steps (staging, keys) run per photo: optimised in debug builds too
 target_compile_options(filmengine_core PRIVATE -O3)
 
