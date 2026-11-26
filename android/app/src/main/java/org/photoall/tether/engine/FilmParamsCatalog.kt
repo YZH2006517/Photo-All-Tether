@@ -32,6 +32,13 @@ object FilmParamsCatalog {
     private val px: (Float) -> String = { "%.1f px".format(it) }
     private val kelvin: (Float) -> String = { if (it < 2000f) "关" else "%.0f K".format(it) }
     private val off: (Float) -> String = { if (it == 0f) "关" else "%.2f".format(it) }
+    /** 微调, as Photo All shows it: "暖 20" / "冷 20", "绿 20" / "品 20" (−1..1 as ±100). */
+    val warmth: (Float) -> String = { shift(it, "暖", "冷") }
+    val greenness: (Float) -> String = { shift(it, "绿", "品") }
+    private fun shift(v: Float, up: String, down: String): String {
+        val n = kotlin.math.round(v * 100).toInt()
+        return if (n == 0) "±0" else (if (n > 0) up else down) + " " + kotlin.math.abs(n)
+    }
 
     /** The negative's long edge in mm, as the engine scales it ("frame mm", 35 = a 135 frame; 0 = its default, 135). */
     private fun frame(longEdgeMm: Float) = 35f * longEdgeMm / 36f
@@ -117,8 +124,11 @@ object FilmParamsCatalog {
         Group("jpeg", "相机 JPEG 来源", "只在没有 RAW、用相机 JPEG 冲洗时起作用", listOf(
             Param("stage restore", "还原场景（去掉相机自带的饱和、反差和肩部）", 0f, 1f, 1f, engineDefault = 0f),
             Param("stage meter", "自动测光", 0f, 1f, 1f, toggle = true),
-            Param("stage temp", "色温（− 冷 / + 暖）", -1f, 1f, 0f),
-            Param("stage tint", "色调（− 品 / + 绿）", -1f, 1f, 0f),
+        )),
+        // as Photo All's import 微调: on top of the white balance, RAW and JPEG alike
+        Group("fine", "微调", "在白平衡之上再偏冷暖、偏绿品一点，RAW 和 JPEG 都起作用", listOf(
+            Param("stage temp", "色温（− 冷 / + 暖）", -1f, 1f, 0f, format = warmth),
+            Param("stage tint", "色调（− 品 / + 绿）", -1f, 1f, 0f, format = greenness),
         )),
         Group("light", "光源", "扫描与印放用的光、场景光的校正", listOf(
             Param("scan ill", "扫描光源", 2000f, 10000f, 5000f, 50f, format = { "%.0f K".format(it) }),

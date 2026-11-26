@@ -88,6 +88,13 @@ class RecipeControls(
             })
         if (r.white != Recipe.WHITE_CAMERA)
             light.addView(ctx.sliderRow("色调", -1f, 1f, r.tint, 0.05f, { "%+.2f".format(it) }, default = 0f, indent = r.white == Recipe.WHITE_KELVIN) { v -> update { it.copy(tint = v) } })
+        // 微调 (as Photo All's import): a little warmer / cooler, greener / more magenta, on top
+        // of the white balance; RAW and JPEG alike
+        light.addView(ctx.separator(42))
+        light.addView(ctx.sliderRow("冷暖微调", -1f, 1f, r.value("stage temp"), 0.01f, FilmParamsCatalog.warmth, default = 0f,
+            glyph = Glyph.THERMO, tint = Ui.YELLOW) { v -> update { it.withParam("stage temp", v) } })
+        light.addView(ctx.sliderRow("色调微调", -1f, 1f, r.value("stage tint"), 0.01f, FilmParamsCatalog.greenness, default = 0f,
+            indent = true) { v -> update { it.withParam("stage tint", v) } })
         dynamic.addView(light, matchWrap())
 
         // texture

@@ -302,12 +302,33 @@ object CameraHub {
             }
             // the maker's own set-up (Canon remote mode, Sony PC Remote handshake, ...)
             val brand = Vendors.brand(target.vendorId, device)
+            // Sony PC Remote (seen on an A7R II): the card is still readable before the SDIO
+            // handshake, and after it the camera may hide or renumber it. Read the card first and
+            // keep that list when the camera no longer gives one after the handshake.
+            val sonyRemote = brand == Brand.SONY && (device ?: info).supports(Vendors.SONY_SDIO_EXT_DEVICE_INFO)
+            var sonyCard: List<StorageInfo> = emptyList()
+            if (sonyRemote) {
+                note("索尼：握手前存储卡 ${storages.size} 张" + storages.joinToString("") { " 0x%08X".format(it.id) })
+                if (storages.isNotEmpty()) {
+                    listAll(gen, keepOnFailure = false)
+                    if (gen != generation) return
+                    sonyCard = storages
+                    note("索尼：握手前从存储卡读到 ${files.size} 个文件")
+                }
+            }
             val (p, di) = Vendors.prepare(c, device ?: info, brand, ::note)
             profile = p
             device = di
             // Panasonic: the cards may open up once its own session is open (Vendors.prepare)
             if (brand == Brand.PANASONIC && storages.isEmpty()) runCatching { refreshStorages() }
                 .onSuccess { note("松下：现在能读到 ${storages.size} 张存储卡") }
+            if (sonyRemote) {
+                // the camera may hide or renumber the card in remote mode (refreshStorages keeps
+                // the one read before when it gives none)
+                runCatching { refreshStorages() }.onFailure { note("索尼：握手后读存储卡失败：${ptpDetail(it)}") }
+                if (storages.isEmpty() && sonyCard.isNotEmpty()) storages = sonyCard
+                note("索尼：握手后存储卡 ${storages.size} 张" + storages.joinToString("") { " 0x%08X".format(it.id) })
+            }
             note("品牌：${brand.label}；新照片：" + listOfNotNull(
                 if (p.pollsEvents) "轮询相机事件" else null,
                 if (p.interruptEvents) "USB 事件" else null,
@@ -318,7 +339,8 @@ object CameraHub {
             connectedAt = System.currentTimeMillis()
             setState(State.CONNECTED, "${device?.model ?: info.model} 已连接")
             startEvents(c, gen)
-            listAll(gen)
+            // after the handshake a Sony may refuse the card it showed a moment ago: keep the list
+            listAll(gen, keepOnFailure = sonyRemote)
         } catch (e: Exception) {
             // Unplugged (or switched off, or re-enumerating as it powers on) while connecting:
             // not a fault; the attach broadcast connects again when it comes back.
@@ -355,10 +377,17 @@ object CameraHub {
     private fun refreshStorages() {
         val c = connection ?: return
         val ids = PtpReader(c.request(Ptp.GET_STORAGE_IDS)).u32Array()
-        storages = ids.filter { (it and 0xFFFF) != 0 }.mapNotNull { id ->
+        val next = ids.filter { (it and 0xFFFF) != 0 }.mapNotNull { id ->
             runCatching { StorageInfo.parse(id, c.request(Ptp.GET_STORAGE_INFO, id)) }
                 .onFailure { note("读取存储卡 0x%08X 失败：%s".format(id, it.message)) }.getOrNull()
         }
+        if (next.isEmpty() && storages.isNotEmpty() && profile?.sonyRemote == true) {
+            // Sony PC Remote hides the card after the handshake: keep the one read before it
+            note("索尼：相机现在不给存储卡（GetStorageIDs：%s），保留之前读到的".format(
+                ids.joinToString(" ") { "0x%08X".format(it) }.ifEmpty { "空" }))
+            return
+        }
+        storages = next
         changed()
     }
 
@@ -368,7 +397,11 @@ object CameraHub {
         if (state == State.CONNECTED) io.execute { runCatching { refreshStorages() }; listAll(gen) }
     }
 
-    private fun listAll(gen: Int) {
+    /**
+     * [keepOnFailure]: when the card can't be listed (or comes back empty), keep the list read
+     * before (Sony PC Remote shows its card before the SDIO handshake, maybe not after it).
+     */
+    private fun listAll(gen: Int, keepOnFailure: Boolean = profile?.sonyRemote == true) {
         val c = connection ?: return
         listing = true
         listDone = 0
@@ -398,12 +431,23 @@ object CameraHub {
                 }
             }
             if (gen != generation) return
+            // shots read from Sony camera memory have no card object: they stay
+            files.values.filter { isLocal(it.handle) }.forEach { found[it.handle] = it }
+            if (keepOnFailure && found.none { !isLocal(it.key) } && files.keys.any { !isLocal(it) }) {
+                note("存储卡这次没列出文件，保留之前读到的 ${files.size} 个")
+                publish(HashMap(files))
+                return
+            }
             files.clear()
             files.putAll(found)
             publish(found)
             note("读取完成：${found.size} 个文件，${items.size} 张，%.1f 秒".format((System.currentTimeMillis() - started) / 1000.0))
         } catch (e: Exception) {
             note("读取文件列表失败：${e.message}")
+            if (keepOnFailure && files.isNotEmpty()) {
+                note("保留之前读到的 ${files.size} 个文件")
+                publish(HashMap(files))
+            }
             ErrorLog.record("读取存储卡文件列表", e, usbReport(usbDevice, connection))
             if (connection?.broken != null) main.post { if (gen == generation) reconnect("连接中断：${e.message}") }
         } finally {

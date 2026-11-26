@@ -67,7 +67,7 @@ object Vendors {
     private const val CANON_OBJECT_REMOVED = 0xC182
 
     private const val SONY_SDIO_CONNECT = 0x9201
-    private const val SONY_SDIO_EXT_DEVICE_INFO = 0x9202
+    const val SONY_SDIO_EXT_DEVICE_INFO = 0x9202
     private const val SONY_ALL_EXT_PROP_INFO = 0x9209
     private const val SONY_OBJECT_IN_MEMORY = 0xD215
     const val SONY_MEMORY_HANDLE = 0xFFFFC001.toInt()

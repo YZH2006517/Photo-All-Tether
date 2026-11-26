@@ -326,6 +326,10 @@ class TuneBench(
     private val knobs = listOf(
         Knob("曝光", "冲洗时整体的亮度（档）", "暗", "亮", -3f, 3f, 1f / 3f, 0f, { "%+.1f EV".format(Locale.US, it) },
             { it.ev }, { r, v -> r.copy(ev = v) }),
+        Knob("色温", "在白平衡之上再偏冷或偏暖一点", "冷", "暖", -1f, 1f, 0.01f, 0f, FilmParamsCatalog.warmth,
+            { it.value("stage temp") }, { r, v -> r.withParam("stage temp", v) }),
+        Knob("色调", "在白平衡之上再偏品红或偏绿一点", "品", "绿", -1f, 1f, 0.01f, 0f, FilmParamsCatalog.greenness,
+            { it.value("stage tint") }, { r, v -> r.withParam("stage tint", v) }),
         Knob("局部影调（HDR）", "暗部提亮、高光收住，保留局部反差（单张曝光融合）", "关", "强", 0f, 1f, 0.05f, 0f,
             { if (it == 0f) "关" else f2(it) }, { it.localTone }, { r, v -> r.copy(localTone = v) }),
         Knob("颗粒", "胶片的颗粒感：1 是原版胶片的颗粒，0 没有颗粒", "细腻", "粗糙", 0f, 2f, 0.05f, d.grainAmount, f2,

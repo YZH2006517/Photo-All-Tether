@@ -17,8 +17,8 @@ android {
         applicationId = "org.photoall.tether"
         minSdk = 29
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.1.5"
+        versionCode = 8
+        versionName = "0.1.6-beta1"
         ndk { abiFilters += "arm64-v8a" }
     }
 

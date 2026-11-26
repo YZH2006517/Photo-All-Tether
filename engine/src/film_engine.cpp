@@ -1250,7 +1250,9 @@ struct FilmEngine::Impl
                                                            : kIdentity),
              source.rgba8 ? 1 : 0, std::exp2(options.exposure_ev), {0, 0}, {0, 1, 1, 1}, {1, 1, 1, 1}};
     static_assert(sizeof(decode) == 96, "decode push constants");
-    if(source.rgba8 && (options.stages.temp != 0.0f || options.stages.tint != 0.0f))
+    // 微调 (colour temperature / tint on top of the white balance): a picture's linear rgb here,
+    // a raw's white-balance gains below
+    if(!source.raw && (options.stages.temp != 0.0f || options.stages.tint != 0.0f))
     {
       // warmer: red up, blue down; greener: green up; overall luminance kept
       const float r = std::exp2(0.30f * options.stages.temp), b = std::exp2(-0.30f * options.stages.temp);
@@ -1286,6 +1288,17 @@ struct FilmEngine::Impl
       push.wb_white[1] = raw.wb[1];
       push.wb_white[2] = raw.wb[2];
       push.wb_white[3] = raw.white;
+      if(options.stages.temp != 0.0f || options.stages.tint != 0.0f)
+      {
+        // the same shift as a picture's, on the camera channels' white-balance gains
+        const float r = std::exp2(0.30f * options.stages.temp), b = std::exp2(-0.30f * options.stages.temp);
+        const float gr = std::exp2(0.20f * options.stages.tint);
+        const float y = 0.2126f * r + 0.7152f * gr + 0.0722f * b;
+        push.wb_white[0] *= r / y;
+        push.wb_white[1] *= gr / y;
+        push.wb_white[2] *= b / y;
+        note("RAW 解码", "微调（色温 / 色调）", "%+.0f / %+.0f", 100.0f * options.stages.temp, 100.0f * options.stages.tint);
+      }
       push.m = rows(raw.camera_to_rec2020);
       push.m.row0[3] = std::exp2(options.exposure_ev);
       std::memcpy(push.cfa, raw.cfa_colour, sizeof(push.cfa));
