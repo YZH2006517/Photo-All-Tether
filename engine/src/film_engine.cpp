@@ -2013,8 +2013,15 @@ struct FilmEngine::Impl
   float print_q = 0.0f;
   float print_ev = 0.0f; // the paper exposure (a slide: the film's) that keeps mid grey there
 
-  bool calibrate_print(const FilmParams &base, ColourSpace output, bool slide, std::string &error)
+  bool calibrate_print(const FilmParams &given, ColourSpace output, bool slide, std::string &error)
   {
+    // Measured at the neutral exposures: the user's 胶片曝光 / 印放曝光 go on top of the
+    // result (develop_source adds print_ev to them). Measured with them, the mid-grey search
+    // took each change of exposure straight back out again, until it ran into its limit
+    // (+2.5 EV), where the picture then jumped. (As Photo All's engine.)
+    FilmParams base = given;
+    base.ev_film = 0.0f;
+    base.ev_paper = 0.0f;
     for(const PrintCalibration &c : print_cache)
       if(c.output == output && c.slide == slide && std::memcmp(&c.params, &base, sizeof(FilmParams)) == 0)
       {
@@ -2117,8 +2124,14 @@ struct FilmEngine::Impl
   std::vector<float> linear_buffer; // a linear DNG as scene light (develop's own source then)
   bool adapt_input = false; // this develop brings the scene to the film's white first
 
-  bool calibrate_scan(const FilmParams &base, ColourSpace output, std::string &error)
+  bool calibrate_scan(const FilmParams &given, ColourSpace output, std::string &error)
   {
+    // As calibrate_print: the scanner is set up on the negative exposed as metered, so the
+    // user's 胶片曝光 stays a real over / under exposure of the negative (a denser or thinner
+    // negative scans brighter or darker) instead of being levelled straight back out.
+    FilmParams base = given;
+    base.ev_film = 0.0f;
+    base.ev_paper = 0.0f;
     for(const ScanCalibration &c : scan_cache)
       if(c.output == output && std::memcmp(&c.params, &base, sizeof(FilmParams)) == 0)
       {
